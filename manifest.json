@@ -1,7 +1,7 @@
 {
   "name": "Edelkrone Portal",
   "short_name": "Edelkrone",
-  "start_url": "/edelkrone-web/index.html",
+  "start_url": "/edel_v2/index.html",
   "display": "standalone",
   "background_color": "#1e3a8a",
   "theme_color": "#1e3a8a",
