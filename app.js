@@ -1,0 +1,2775 @@
+// --- KONFİGÜRASYON ---
+const API_URL = "https://edelkrone-api.06mmt8129.workers.dev";
+
+const CACHE_PREFIX = "cache_";
+
+const CACHE_AGES = {
+    aktifPartiler: 5 * 60 * 1000,
+    operatorler: 30 * 60 * 1000,
+    ayarcilar: 30 * 60 * 1000,
+    depo: 3 * 24 * 60 * 60 * 1000,
+    yeniPartiler: 15 * 60 * 1000,
+    selectBenchDetails: 10 * 60 * 1000,
+    default: 30 * 60 * 1000
+};
+
+function setCache(key, data) {
+    try {
+        const payload = {
+            timestamp: Date.now(),
+            data: data
+        };
+
+        localStorage.setItem(
+            CACHE_PREFIX + key,
+            JSON.stringify(payload)
+        );
+    } catch (e) {
+        console.error("Cache yazma hatası:", e);
+    }
+}
+
+function getCache(key) {
+    try {
+        const raw = localStorage.getItem(CACHE_PREFIX + key);
+
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw);
+
+        if (!parsed || typeof parsed !== "object") {
+            removeCache(key);
+            return null;
+        }
+
+        if (!parsed.timestamp) {
+            return parsed.data ?? null;
+        }
+
+        const maxAge =
+            CACHE_AGES[key] ||
+            CACHE_AGES.default;
+
+        const now = Date.now();
+
+        if ((now - parsed.timestamp) > maxAge) {
+            removeCache(key);
+            return null;
+        }
+
+        return parsed.data;
+    } catch (e) {
+        return null;
+    }
+}
+
+function removeCache(key) {
+    localStorage.removeItem(CACHE_PREFIX + key);
+}
+
+// --- ÇEREZLİ FETCH YARDIMCISI ---
+async function fetchWithAuth(url) {
+    const userCookie = localStorage.getItem('userCookie') || "";
+    return fetch(url, {
+        headers: {
+            "X-User-Cookie": userCookie
+        }
+    });
+}
+
+// --- SAAT VE TARİH ---
+function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').innerText = now.toLocaleTimeString('tr-TR', { hour12: false });
+    const options = { day: 'numeric', month: 'long', weekday: 'long' };
+    let dateStr = now.toLocaleDateString('tr-TR', options);
+    dateStr = dateStr.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    document.getElementById('dateDisplay').innerText = dateStr;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// --- YAN MENÜ ---
+const sidebar = document.getElementById('sidebar');
+document.getElementById('menuBtn').addEventListener('click', () => sidebar.classList.add('active'));
+function closeSidebar() { sidebar.classList.remove('active'); }
+
+// --- MODAL YÖNETİMİ ---
+function openModal(id) { document.getElementById(id).classList.add('active'); }
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+// --- BİLGİ VE ONAY MODALLARI ---
+function showInfoModal(title, message) {
+    document.getElementById('infoModalTitle').innerText = title;
+    document.getElementById('infoModalMessage').innerText = message;
+    openModal('infoModal');
+}
+
+function showConfirmModal(message, onConfirm) {
+    document.getElementById('confirmModalMessage').innerText = message;
+    const btn = document.getElementById('confirmModalBtn');
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    newBtn.addEventListener('click', () => { closeModal('confirmModal'); onConfirm(); });
+    openModal('confirmModal');
+}
+
+// --- TEMA YÖNETİMİ ---
+const themeToggle = document.getElementById('themeToggle');
+if (localStorage.getItem('theme') === 'dark') {
+    document.body.classList.add('dark-mode');
+    themeToggle.checked = true;
+}
+themeToggle.addEventListener('change', () => {
+    if (themeToggle.checked) {
+        document.body.classList.add('dark-mode');
+        localStorage.setItem('theme', 'dark');
+    } else {
+        document.body.classList.remove('dark-mode');
+        localStorage.setItem('theme', 'light');
+    }
+});
+
+// --- KULLANICI ARAYÜZÜNÜ GÜNCELLE ---
+function updateLoggedInUserUI() {
+    const user = localStorage.getItem('loggedInUser');
+    const displayEl = document.getElementById('loggedInUserDisplay');
+    if (user) {
+        displayEl.innerText = "👤 " + user.replace('_', ' ').toUpperCase();
+    } else {
+        displayEl.innerText = "KULLANICI: -";
+    }
+}
+
+// --- GİRİŞ SİSTEMİ ---
+let secilenKullanici = "";
+
+function selectUser(username) {
+    secilenKullanici = username;
+    document.getElementById('userSelection').style.display = 'none';
+    document.getElementById('passwordArea').style.display = 'block';
+    document.getElementById('selectedUserName').innerText = username.toUpperCase().replace('_', ' ');
+    document.getElementById('userPassword').value = '';
+    document.getElementById('userPassword').focus();
+}
+
+function cancelLogin() {
+    document.getElementById('passwordArea').style.display = 'none';
+    document.getElementById('userSelection').style.display = 'grid';
+    secilenKullanici = "";
+}
+
+async function attemptLogin() {
+    const password = document.getElementById('userPassword').value;
+    if (!password) {
+        showInfoModal("Uyarı", "Lütfen şifrenizi girin.");
+        return;
+    }
+
+    showInfoModal("Bekleyin", "Giriş yapılıyor...");
+
+    try {
+        const response = await fetch(`${API_URL}/login?user=${secilenKullanici}&pass=${password}`);
+        const data = await response.json();
+
+        if (data.success) {
+            localStorage.setItem('loggedInUser', secilenKullanici);
+            localStorage.setItem('userCookie', data.cookie);
+            closeModal('loginModal');
+            showInfoModal("Giriş Başarılı", "Hoş geldin " + secilenKullanici.toUpperCase().replace('_', ' '));
+            updateLoggedInUserUI();
+        } else {
+            showInfoModal("Hata", data.message || "Hatalı şifre!");
+            document.getElementById('userPassword').value = '';
+        }
+    } catch (err) {
+        showInfoModal("Hata", "Sunucuya bağlanılamadı.");
+    }
+}
+
+function logout() {
+    showConfirmModal("Çıkış yapmak istediğinize emin misiniz?", () => {
+        localStorage.removeItem('loggedInUser');
+        localStorage.removeItem('userCookie');
+        updateLoggedInUserUI();
+        closeSidebar();
+        openModal('loginModal');
+    });
+}
+
+function clearCache() {
+    showConfirmModal("Tüm önbellek verileri (listeler, detaylar, tezgah seçimleri) silinecek. Emin misiniz?", () => {
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith(CACHE_PREFIX) || key.includes("edelkrone_")) {
+                localStorage.removeItem(key);
+            }
+        });
+        // Kayıt Girişi sayfasına ait özel hafızalar
+        localStorage.removeItem("edelkrone_bench_selections");
+        localStorage.removeItem("edelkrone_bench_clicks");
+        localStorage.removeItem("edelkrone_bench_sort_order");
+        localStorage.removeItem("edelkrone_time_limit");
+        
+        showInfoModal("Başarılı", "Önbellek temizlendi. Sayfayı yenileyerek güncel verileri çekebilirsiniz.");
+    });
+}
+
+function resetApp() {
+    showConfirmModal("Uygulama tamamen sıfırlanacak (Giriş, tema, ayarlar dahil). Emin misiniz?", () => {
+        localStorage.clear();
+        location.reload(); // Sayfayı yenile, giriş ekranına döner
+    });
+}
+
+function navigateTo(screenId) {
+        // Sayfadan çıkarken zamanlayıcıyı durdur (Güvenli kontrol)
+    if (typeof KayitGirisApp !== 'undefined' && typeof KayitGirisApp.stopColorCheckInterval === 'function') {
+        KayitGirisApp.stopColorCheckInterval();
+    }
+
+    document.querySelectorAll('.home-container, .page-container').forEach(el => el.classList.add('hidden'));
+    const backBtn = document.getElementById('backBtn');
+    const menuBtn = document.getElementById('menuBtn');
+
+    if (screenId === 'home') {
+        document.getElementById('homeScreen').classList.remove('hidden');
+        backBtn.style.display = 'none';
+        menuBtn.style.display = 'block';
+    } else {
+        document.getElementById(screenId + 'Screen').classList.remove('hidden');
+        backBtn.style.display = 'block';
+        menuBtn.style.display = 'none';
+        
+        // Sayfa açıldığında ilgili fonksiyonları çağır
+        if (screenId === 'aktifPartiler') fetchParties();
+        else if (screenId === 'operatorAtamalari') fetchOperators();
+        else if (screenId === 'ayarciAtamalari') fetchAyarcilar();
+        else if (screenId === 'depo') fetchDepo();
+        else if (screenId === 'yeniParti') fetchYeniPartiler();
+        else if (screenId === 'tezgahKapatma') renderTezgahKapatma();
+        else if (screenId === 'kayitGiris') KayitGirisApp.init(); // BU SATIRI EKLE
+    }
+}
+
+// --- YENİLE BUTONU MANTIĞI ---
+function refreshCurrentPage() {
+    if (!document.getElementById('aktifPartilerScreen').classList.contains('hidden')) {
+        removeCache('aktifPartiler'); // Cache'i sil ki yeniden çekilsin
+        fetchParties();
+    } else if (!document.getElementById('operatorAtamalariScreen').classList.contains('hidden')) {
+        removeCache('operatorler');
+        fetchOperators();
+	} else if (!document.getElementById('ayarciAtamalariScreen').classList.contains('hidden')) {
+        removeCache('ayarcilar');
+        fetchAyarcilar(); // BURAYI GÜNCELLE
+		
+		    } else if (!document.getElementById('yeniPartiScreen').classList.contains('hidden')) {
+        removeCache('yeniPartiler');
+        fetchYeniPartiler();
+		
+		    } else if (!document.getElementById('kayitGirisScreen').classList.contains('hidden')) {
+        // Önbelleği sil ve zorla güncelle
+        removeCache('selectBenchDetails');
+        KayitGirisApp.fetchBenchDetails(true);
+    
+        } else if (!document.getElementById('depoScreen').classList.contains('hidden')) {
+        removeCache('depo');
+        fetchDepo();
+    } else {
+        fetchWeather();
+    }
+}
+
+// --- AKTİF PARTİLER ---
+let currentSort = 0;
+let partyData = [];
+
+async function fetchParties() {
+    const listContainer = document.getElementById('partyList');
+    const countText = document.getElementById('activeBenchCount');
+    
+    // CACHE KONTROLÜ
+    const cachedData = getCache('aktifPartiler');
+    if (cachedData) {
+        partyData = cachedData;
+        renderParties();
+        return;
+    }
+
+    listContainer.innerHTML = '<div style="text-align:center; padding: 40px; font-weight:bold; color: var(--gray);">Veriler çekiliyor...</div>';
+    countText.innerText = "Yükleniyor...";
+    
+    try {
+        const response = await fetchWithAuth(`${API_URL}?path=Manufacturing/ProductionBatches/List`);
+        if (!response.ok) throw new Error("Sunucu hatası");
+        const htmlText = await response.text();
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, "text/html");
+        const batches = doc.querySelectorAll('.batch');
+        
+        partyData = [];
+        
+        const promises = Array.from(batches).map(async (batch) => {
+            let tezgah = batch.querySelector('.gauge .value')?.innerText.trim() || "";
+            let isAdi = batch.querySelector('.batch-data .header')?.innerText.trim() || "";
+            let partiNo = batch.querySelector('.batch-data a.description')?.innerText.trim() || "";
+            let operatör = batch.querySelector('.batch-data div.description')?.innerText.trim() || "";
+            let yuzdeEl = batch.querySelector('.chart');
+            let yuzde = yuzdeEl ? parseFloat(yuzdeEl.getAttribute('data-percent')) : 0.0;
+            let adetText = batch.querySelector('.gauge .description')?.innerText.trim() || "0 / 0";
+            
+            let adetParts = adetText.split("/");
+            let islenen = adetParts[0] ? adetParts[0].trim() : "0";
+            let toplam = adetParts[1] ? adetParts[1].trim() : "0";
+
+            let resimUrl = "", kalanSure = "-", kalanMiktar = "-", basariliMiktar = "-", hedeflenenMiktar = "-";
+            let operasyondaCikanAdet = "-", tezgahOperasyonSuresi = "-", birinciKaliteVaka = "-", ikinciKaliteVaka = "-";
+            let ayarcilar = "", numuneKontrolu = "";
+            let uretimRaporu = [];
+
+            if (partiNo) {
+                try {
+                    const detayRes = await fetchWithAuth(`${API_URL}?path=Manufacturing/ProductionBatches/Details/${partiNo}`);
+                    const detayHtml = await detayRes.text();
+                    const detayDoc = parser.parseFromString(detayHtml, "text/html");
+                    
+                    const imgEl = detayDoc.querySelector('.ui.fluid.card .ui.image img');
+                    if (imgEl) resimUrl = imgEl.getAttribute('src').replace(/\\/g, '/');
+
+                    const dtElements = detayDoc.querySelectorAll('dt');
+                    for (let i = 0; i < dtElements.length; i++) {
+                        const text = dtElements[i].innerText.trim();
+                        const dd = dtElements[i].nextElementSibling;
+                        if (!dd) continue;
+                        const val = dd.innerText.trim();
+
+                        if (text.includes('Kalan Süre')) kalanSure = val;
+                        else if (text.includes('Kalan Miktar')) kalanMiktar = val;
+                        else if (text.includes('Başarılı Miktar')) basariliMiktar = val;
+                        else if (text.includes('Hedeflenen Miktar')) hedeflenenMiktar = val;
+                        else if (text.includes('Operasyonda Çıkan Adet')) operasyondaCikanAdet = val;
+                        else if (text.includes('Tezgah Operasyon Süresi')) tezgahOperasyonSuresi = val;
+                        else if (text.includes('1.Kalite Toplam Vaka Adedi')) birinciKaliteVaka = val;
+                        else if (text.includes('2.Kalite Toplam Vaka Adedi')) ikinciKaliteVaka = val;
+                        else if (text.includes('Numune ve Ekipman Kontrolü')) numuneKontrolu = val;
+                    }
+
+                    const ayarciList = detayDoc.querySelectorAll('.ui.list .item .header');
+                    let ayarciArr = [];
+                    ayarciList.forEach(el => ayarciArr.push(el.innerText.trim()));
+                    ayarcilar = ayarciArr.join(', ');
+
+                    const rows = detayDoc.querySelectorAll('.ui.fluid.table tbody tr');
+                    rows.forEach(row => {
+                        const cols = row.querySelectorAll('td');
+                        if (cols.length >= 6) {
+                            let onclickAttr = cols[3].querySelector('a')?.getAttribute('onclick') || "";
+                            let vakaIdMatch = onclickAttr.match(/\d+/);
+                            let vakaLinkId = vakaIdMatch ? vakaIdMatch[0] : "";
+
+                            uretimRaporu.push({
+                                tarih: cols[0].innerText.trim().replace(/\n/g, ' '),
+                                minHedef: cols[1].innerText.trim(),
+                                uretilen: cols[2].innerText.trim(),
+                                vakaSayisi: cols[3].innerText.trim(),
+                                vakaLinkId: vakaLinkId,
+                                operator: cols[4].innerText.trim(),
+                                kaliteci: cols[5].innerText.trim()
+                            });
+                        }
+                    });
+
+                } catch (e) { console.log("Detay çekilemedi:", partiNo); }
+            }
+
+            return {
+                tezgah, isAdi, partiNo, operatör, yuzde, islenen, toplam, resimUrl, kalanSure, kalanMiktar, 
+                basariliMiktar, hedeflenenMiktar, operasyondaCikanAdet, tezgahOperasyonSuresi, 
+                birinciKaliteVaka, ikinciKaliteVaka, ayarcilar, numuneKontrolu, uretimRaporu
+            };
+        });
+
+        partyData = await Promise.all(promises);
+        setCache('aktifPartiler', partyData); // CACHE'E KAYDET
+        renderParties();
+        
+    } catch (err) {
+        listContainer.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--danger); font-weight:bold;">Hata: ${err.message}</div>`;
+        countText.innerText = "Bağlantı Hatası";
+    }
+}
+
+function renderParties(veri = null) {
+    const listContainer = document.getElementById('partyList');
+    listContainer.innerHTML = '';
+    
+    // Dışarıdan sıralanmış veri gelmişse onu kullan, gelmemişse partyData'yı kullan
+    let sortedData = veri ? [...veri] : [...partyData];
+
+    document.getElementById('activeBenchCount').innerText = `Aktif Tezgah Sayısı: ${sortedData.length}`;
+
+    if (sortedData.length === 0) {
+        listContainer.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--gray);">Aktif parti bulunamadı.</div>';
+        return;
+    }
+
+    sortedData.forEach((p) => {
+        let renk = "#EF4444"; if (p.yuzde >= 70) renk = "#4ADE80"; else if (p.yuzde >= 30) renk = "#FBBF24";
+        let opName = p.operatör ? p.operatör : "-";
+        let imgHtml = p.resimUrl ? `<img src="${p.resimUrl}" class="party-img" alt="${p.tezgah}">` : `<div class="party-img"></div>`;
+        
+        const card = document.createElement('div');
+        card.className = 'party-card';
+        card.style.cursor = 'pointer';
+        card.onclick = () => showPartyDetail(p);
+        
+        card.innerHTML = `
+            <div class="party-top">
+                <div class="party-left">
+                    ${imgHtml}
+                    <div class="party-tezgah">${p.tezgah}</div>
+                </div>
+                <div class="party-info">${p.isAdi} | ${p.partiNo}</div>
+            </div>
+            <div class="progress-container">
+                <div class="progress-bar" style="width: ${p.yuzde}%; background-color: ${renk};"></div>
+            </div>
+            <div class="party-bottom">
+                <div class="party-operator">${opName}</div>
+                <div style="text-align:right;">
+                    <div class="party-time">${p.kalanSure}</div>
+                    <div class="party-percent" style="color: ${renk};">%${p.yuzde.toFixed(1)} (${p.islenen}/${p.toplam})</div>
+                </div>
+            </div>
+        `;
+        listContainer.appendChild(card);
+    });
+}
+
+function sortParties(type) {
+    currentSort = type;
+    document.querySelectorAll('.filter-btn').forEach((btn, index) => btn.classList.toggle('active', index === type));
+    
+    // partyData'yı sırala
+    let sortedData = [...partyData];
+    
+    if (type === 1) { // ▲ Kalan Süre (Artan)
+        sortedData.sort((a, b) => {
+            const timeA = parseTimeToMinutes(a.kalanSure);
+            const timeB = parseTimeToMinutes(b.kalanSure);
+            return timeA - timeB;
+        });
+    } else if (type === 2) { // ▼ Kalan Süre (Azalan)
+        sortedData.sort((a, b) => {
+            const timeA = parseTimeToMinutes(a.kalanSure);
+            const timeB = parseTimeToMinutes(b.kalanSure);
+            return timeB - timeA;
+        });
+    } else { // Operatör (Çoktan Aza)
+        sortedData.sort((a, b) => (b.operatör || "").localeCompare(a.operatör || ""));
+    }
+    
+    renderParties(sortedData); // renderParties'e sıralanmış veriyi gönder
+}
+
+// Yardımcı Fonksiyon: "12 saat 30 dk" veya "15 saat 43 dk 48 sn" -> Saniye cinsinden süre
+function parseTimeToMinutes(timeStr) {
+    if (!timeStr || timeStr === "-") return 999999999; // Süre yoksa en sona at
+
+    let totalSeconds = 0;
+    
+    // Saat, dakika ve saniye değerlerini regex ile ayıkla
+    const hourMatch = timeStr.match(/(\d+)\s*saat/);
+    const minMatch = timeStr.match(/(\d+)\s*dk/);
+    const secMatch = timeStr.match(/(\d+)\s*sn/);
+
+    if (hourMatch) totalSeconds += parseInt(hourMatch[1]) * 3600;
+    if (minMatch) totalSeconds += parseInt(minMatch[1]) * 60;
+    if (secMatch) totalSeconds += parseInt(secMatch[1]);
+
+    // Eğer hiçbir şey bulunamadıysa (örneğin sadece "30 dk" yazıyorsa) 
+    // ve sayı varsa onu dakika olarak kabul et
+    if (totalSeconds === 0 && !isNaN(parseInt(timeStr))) {
+        return parseInt(timeStr) * 60; 
+    }
+
+    return totalSeconds;
+}
+
+// --- PARTİ DETAY MODALI ---
+function showPartyDetail(p) {
+    const content = document.getElementById('partyDetailContent');
+    let renk = "#EF4444"; if (p.yuzde >= 70) renk = "#4ADE80"; else if (p.yuzde >= 30) renk = "#FBBF24";
+
+    const detayKutulari = [
+        { label: "Tezgah Adı", value: p.tezgah }, { label: "Operasyon Adı", value: p.isAdi },
+        { label: "Parti No", value: p.partiNo }, { label: "Tezgah Op. Süresi", value: p.tezgahOperasyonSuresi },
+        { label: "Operasyonda Çıkan", value: p.operasyondaCikanAdet }, { label: "Hedeflenen Miktar", value: p.hedeflenenMiktar },
+        { label: "Başarılı Miktar", value: p.basariliMiktar }, { label: "1. Kalite Vaka", value: p.birinciKaliteVaka },
+        { label: "2. Kalite Vaka", value: p.ikinciKaliteVaka }
+    ];
+
+    let gridHtml = detayKutulari.map(k => `
+        <div class="detail-grid-item">
+            <span class="detail-label">${k.label}</span>
+            <span class="detail-value">${k.value}</span>
+        </div>
+    `).join('');
+
+        let raporHtml = '';
+    if (p.uretimRaporu && p.uretimRaporu.length > 0) {
+        const grupluRapor = p.uretimRaporu.reduce((acc, row) => {
+            if (!acc[row.kaliteci]) acc[row.kaliteci] = [];
+            acc[row.kaliteci].push(row);
+            return acc;
+        }, {});
+
+        raporHtml = `<h3 style="margin-top: 24px; margin-bottom: 12px;">Üretim Raporu</h3>`;
+        
+        for (const [kaliteci, satirlar] of Object.entries(grupluRapor)) {
+            // TOPLAMLARI HESAPLA
+            let toplamHedef = 0, toplamUretilen = 0, toplamVaka = 0;
+            satirlar.forEach(s => {
+                toplamHedef += parseInt(s.minHedef) || 0;
+                toplamUretilen += parseInt(s.uretilen) || 0;
+                toplamVaka += parseInt(s.vakaSayisi) || 0;
+            });
+
+            raporHtml += `
+                <div class="rapor-group">
+                    <h4 class="rapor-kaliteci">${kaliteci}</h4>
+                    <div style="overflow-x: auto;">
+                        <table class="rapor-table">
+                            <thead><tr><th>Tarih</th><th>Operatör</th><th>Hedef</th><th>Üretilen</th><th>Vaka</th></tr></thead>
+                            <tbody>
+                                ${satirlar.map(s => {
+                                    let vakaHtml = parseInt(s.vakaSayisi) > 0 
+                                        ? `<span style="color: var(--danger); font-weight: bold; cursor: pointer; text-decoration: underline;" onclick="openVakaModal('${s.vakaLinkId}', '${s.vakaSayisi}')">${s.vakaSayisi}</span>` 
+                                        : `<span style="color: gray;">0</span>`;
+                                    return `
+                                        <tr>
+                                            <td>${s.tarih}</td><td>${s.operator}</td><td>${s.minHedef}</td><td>${s.uretilen}</td><td>${vakaHtml}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                                <!-- TOPLAM SATIRI BURAYA EKLENDİ -->
+                                <tr style="border-top: 2px solid var(--danger); font-weight: bold;">
+                                    <td colspan="2" style="color: var(--danger);">TOPLAM</td>
+                                    <td>${toplamHedef}</td>
+                                    <td>${toplamUretilen}</td>
+                                    <td style="color: var(--danger);">${toplamVaka}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    content.innerHTML = `
+        <div style="text-align: center; margin-bottom: 16px;">
+            ${p.resimUrl ? `<img src="${p.resimUrl}" style="max-width: 100%; max-height: 200px; object-fit: contain; margin-bottom: 12px; border-radius: 8px;">` : ''}
+            <div style="display: flex; justify-content: space-around;">
+                <div><div style="font-size: 12px; color: var(--gray);">KALAN SÜRE</div><div style="font-size: 24px; font-weight: bold; color: var(--danger);">${p.kalanSure}</div></div>
+                <div><div style="font-size: 12px; color: var(--gray);">KALAN ADET</div><div style="font-size: 24px; font-weight: bold; color: var(--danger);">${p.kalanMiktar}</div></div>
+            </div>
+        </div>
+        <div class="progress-container" style="height: 12px; margin-bottom: 4px;"><div class="progress-bar" style="width: ${p.yuzde}%; background-color: ${renk};"></div></div>
+        <div style="text-align: right; font-size: 12px; color: ${renk}; font-weight: bold; margin-bottom: 24px;">%${p.yuzde.toFixed(1)} tamamlandı</div>
+        <div class="detail-top-row">
+            <div class="detail-card"><div class="detail-card-title">Ayarcılar</div><div class="detail-card-value">${p.ayarcilar || '-'}</div></div>
+            <div class="detail-card"><div class="detail-card-title">Numune/Ekipman</div><div class="detail-card-value">${p.numuneKontrolu || '-'}</div></div>
+        </div>
+        <div class="detail-grid">${gridHtml}</div>
+        ${raporHtml}
+    `;
+    openModal('partyDetailModal');
+}
+
+// --- VAKA DETAY MODALI ---
+async function openVakaModal(vakaLinkId, vakaSayisi) {
+    openModal('vakaDetailModal');
+    const content = document.getElementById('vakaModalContent');
+    
+    // CACHE KONTROLÜ
+    const cacheKey = 'vaka_' + vakaLinkId;
+    const cachedData = getCache(cacheKey);
+    if (cachedData) {
+        renderVakaListesi(cachedData);
+        return;
+    }
+
+    content.innerHTML = '<div style="text-align:center; padding: 20px;">Vakalar yükleniyor...</div>';
+
+    try {
+        if (!vakaLinkId) {
+            content.innerHTML = '<div style="text-align:center; padding: 20px; color: gray;">Vaka detay linki bulunamadı.</div>';
+            return;
+        }
+
+        const response = await fetchWithAuth(`${API_URL}?path=Manufacturing/ProductionBatches/GetQualityRecordsByProductionRecord?productionRecordId=${vakaLinkId}`);
+        const htmlText = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, "text/html");
+        
+        const rows = doc.querySelectorAll('table#qualityRecords tbody tr');
+        let vakaListesi = [];
+        
+        rows.forEach(row => {
+            const cols = row.querySelectorAll('td');
+            if (cols.length >= 3) {
+                vakaListesi.push({
+                    vakaNo: cols[0].innerText.trim(),
+                    adet: cols[1].innerText.trim(),
+                    aciklama: cols[2].innerText.trim()
+                });
+            }
+        });
+
+        setCache(cacheKey, vakaListesi); // CACHE'E KAYDET
+        renderVakaListesi(vakaListesi);
+
+    } catch (err) {
+        content.innerHTML = `<div style="text-align:center; padding: 20px; color: red;">Hata: ${err.message}</div>`;
+    }
+}
+
+function renderVakaListesi(vakaListesi) {
+    const content = document.getElementById('vakaModalContent');
+    if (vakaListesi.length === 0) {
+        content.innerHTML = '<div style="text-align:center; padding: 20px; color: gray;">Vaka detayı bulunamadı.</div>';
+        return;
+    }
+
+    let vakaHtml = '';
+    vakaListesi.forEach(v => {
+        vakaHtml += `
+            <div class="detail-card" style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: bold; font-size: 14px;">Vaka No: <span style="color: var(--danger); cursor: pointer; text-decoration: underline;" onclick="window.open('https://uys.edelkrone.com/Manufacturing/Quality/Details/${v.vakaNo}', '_blank')">${v.vakaNo}</span></span>
+                    <span style="font-size: 12px; color: gray;">(${v.adet} adet)</span>
+                </div>
+                <div style="font-size: 12px; margin-top: 4px;">${v.aciklama}</div>
+            </div>
+        `;
+    });
+    content.innerHTML = vakaHtml;
+}
+
+async function fetchOperators() {
+    const listContainer = document.getElementById('operatorList');
+    const countText = document.getElementById('operatorCount');
+    
+    // CACHE KONTROLÜ
+    const cachedData = getCache('operatorler');
+    if (cachedData) {
+        renderOperators(cachedData);
+        return;
+    }
+
+    listContainer.innerHTML = '<div style="text-align:center; padding: 40px; font-weight:bold; color: var(--gray);">Operatörler çekiliyor...</div>';
+    countText.innerText = "Yükleniyor...";
+
+    try {
+        const response = await fetchWithAuth(`${API_URL}?path=Manufacturing/Workbenches/Assignments`);
+        if (!response.ok) throw new Error("Sunucu hatası");
+        const htmlText = await response.text();
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, "text/html");
+        const cards = doc.querySelectorAll('.ui.inverted.card');
+        let operatorData = [];
+
+        cards.forEach(card => {
+            const isimEl = card.querySelector('.center.aligned.header span');
+            const isim = isimEl ? isimEl.innerText.trim() : "Bilinmeyen";
+            const imgEl = card.querySelector('.image img');
+            const foto = imgEl ? imgEl.getAttribute('src') : "";
+
+            let satirlar = [];
+            let toplamIs = "-";
+
+            const rows = card.querySelectorAll('.ui.grid > .row');
+            rows.forEach(row => {
+                const cols = row.querySelectorAll('.column');
+                if (cols.length >= 4) {
+                    const tezgahEl = cols[0].querySelector('a') || cols[0];
+                    const tezgah = tezgahEl ? tezgahEl.innerText.trim() : "";
+
+                    const isAdiEl = cols[1].querySelector('a') || cols[1];
+                    let isAdi = isAdiEl ? isAdiEl.innerText.trim() : "-";
+                    if (!isAdi || isAdi === "") isAdi = "-";
+
+                    const partiEl = cols[2].querySelector('a') || cols[2];
+                    let partiNo = partiEl ? partiEl.innerText.trim() : "-";
+                    if (!partiNo || partiNo === "") partiNo = "-";
+
+                    // Tezgah adında veya iş adında "Toplam" geçiyorsa bunu tabloya satır olarak EKLEME
+                    if (tezgah && tezgah !== "" && tezgah.length < 10 && !tezgah.includes("icon") && !tezgah.includes("Toplam")) {
+                        satirlar.push({ tezgah, isAdi, partiNo });
+                    }
+                }
+            });
+			
+			// İşi olanlar üstte, işi olmayanlar altta olacak şekilde satırları sırala
+            satirlar.sort((a, b) => {
+                const aDolu = (a.isAdi !== "-" && a.isAdi !== "") ? 1 : 0;
+                const bDolu = (b.isAdi !== "-" && b.isAdi !== "") ? 1 : 0;
+                return bDolu - aDolu; // Dolu olanlar (1) öne geçer
+            });
+
+            operatorData.push({ isim, foto, satirlar, toplamIs });
+        });
+
+        operatorData.sort((a, b) => {
+            const aDolu = a.satirlar.filter(s => s.isAdi !== "-" && s.isAdi !== "").length;
+            const bDolu = b.satirlar.filter(s => s.isAdi !== "-" && s.isAdi !== "").length;
+            return bDolu - aDolu;
+        });
+
+        setCache('operatorler', operatorData);
+        renderOperators(operatorData);
+        
+    } catch (err) {
+        listContainer.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--danger); font-weight:bold;">Hata: ${err.message}</div>`;
+        countText.innerText = "Bağlantı Hatası";
+    }
+}
+
+function renderOperators(operators) {
+    const listContainer = document.getElementById('operatorList');
+    const countText = document.getElementById('operatorCount');
+    listContainer.innerHTML = '';
+    
+    let toplamDolu = 0;
+    let toplamBos = 0;
+
+    operators.forEach(op => {
+        op.satirlar.forEach(s => {
+            if (s.isAdi !== "-" && s.isAdi !== "") toplamDolu++;
+            else toplamBos++;
+        });
+    });
+
+    countText.innerHTML = `<span style="color: #4ADE80;">Dolu Tezgah: ${toplamDolu}</span> &nbsp;|&nbsp; <span style="color: #EF4444;">Boş Tezgah: ${toplamBos}</span>`;
+
+    if (operators.length === 0) {
+        listContainer.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--gray);">Atanmış operatör bulunamadı.</div>';
+        return;
+    }
+
+    operators.forEach(op => {
+        const imgHtml = op.foto ? `<img src="${op.foto}" class="op-img" onerror="this.style.display='none'">` : `<div class="op-img"></div>`;
+        const isSayisi = op.satirlar.filter(s => s.isAdi !== "-" && s.isAdi !== "").length;
+        let tableRows = '';
+        
+        op.satirlar.forEach(s => {
+            const isDolu = s.isAdi !== "-" && s.isAdi !== "";
+            // İşi varsa yeşil (t-green), işi yoksa kırmızı (t-red) yapıyoruz
+            const renkSinifi = isDolu ? "t-green" : "t-red";
+            const gosterilecekIs = isDolu ? s.isAdi : "-";
+            const partiText = isDolu ? s.partiNo : "-";
+
+            // Parti numarası varsa ve sayısal bir değerse parti detay sayfasına link ver
+            let partiHtml = partiText;
+            if (isDolu && partiText !== "-" && !isNaN(parseInt(partiText))) {
+                const partiDetayUrl = `https://uys.edelkrone.com/Manufacturing/ProductionBatches/Details/${partiText}`;
+                partiHtml = `<a href="${partiDetayUrl}" target="_blank" style="color: #60A5FA; text-decoration: none; font-weight: bold;">${partiText}</a>`;
+            }
+
+            tableRows += `
+                <tr>
+                    <td class="t-name ${renkSinifi}">${s.tezgah}</td>
+                    <td style="color: ${isDolu ? 'inherit' : '#4ADE80'};">${gosterilecekIs}</td>
+                    <td style="color: ${isDolu ? 'inherit' : '#4ADE80'};">${partiHtml}</td>
+                </tr>
+            `;
+        });
+
+       const calisanSayisi = op.satirlar.filter(s => s.isAdi !== "-" && s.isAdi !== "").length;
+        const calismayanSayisi = op.satirlar.length - calisanSayisi;
+
+        const card = document.createElement('div');
+        card.className = 'operator-card';
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="op-info">
+                    ${imgHtml}
+                    <div class="op-name">${op.isim}</div>
+                </div>
+                <div style="display: flex; gap: 12px; font-size: 0.75rem; text-align: center;">
+                    <div>
+                        <div style="color: var(--gray); font-size: 0.65rem;">Açık Tezgah</div>
+                        <span style="color: #4ADE80; font-weight: bold; font-size: 0.9rem;">${calisanSayisi}</span>
+                    </div>
+                    <div>
+                        <div style="color: var(--gray); font-size: 0.65rem;">Kapalı Tezgah</div>
+                        <span style="color: #EF4444; font-weight: bold; font-size: 0.9rem;">${calismayanSayisi}</span>
+                    </div>
+                    <div>
+                        <div style="color: var(--gray); font-size: 0.65rem;">Toplam Tezgah</div>
+                        <span style="color: var(--text); font-weight: bold; font-size: 0.9rem;">${op.satirlar.length}</span>
+                    </div>
+                </div>
+            </div>
+            <table class="op-table">
+                <thead><tr><th>Tezgah</th><th>İş</th><th>Parti</th></tr></thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+        listContainer.appendChild(card);
+    });
+}
+
+// --- DEPO (PARÇA ARAMA) ---
+let tumDepoVerileri = [];
+
+async function fetchDepo() {
+    const listContainer = document.getElementById('depoResults');
+    
+    // CACHE KONTROLÜ
+    const cachedData = getCache('depo');
+    if (cachedData) {
+        tumDepoVerileri = cachedData;
+        renderDepo(tumDepoVerileri);
+        return;
+    }
+
+    listContainer.innerHTML = '<div style="text-align:center; padding: 40px; font-weight:bold; color: var(--gray);">Parçalar çekiliyor, lütfen bekleyin...</div>';
+
+    try {
+        const response = await fetchWithAuth(`${API_URL}?path=Manufacturing/Parts`);
+        if (!response.ok) throw new Error("Sunucu hatası");
+        const htmlText = await response.text();
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, "text/html");
+        const rows = doc.querySelectorAll('#partsTable tbody tr');
+        tumDepoVerileri = [];
+
+        rows.forEach(row => {
+            const cols = row.querySelectorAll('td');
+            if (cols.length >= 5) {
+                const imgEl = cols[0].querySelector('img');
+                const resimUrl = imgEl ? imgEl.getAttribute('src').replace(/\\/g, '/') : "";
+                
+                const isimLink = cols[1].querySelector('a');
+                const isim = isimLink ? isimLink.innerText.trim() : cols[1].innerText.trim();
+                const detayUrl = isimLink ? isimLink.getAttribute('href') : "";
+                const raf = cols[1].innerText.replace(isim, "").trim();
+                
+                const operasyon = cols[2].innerText.trim();
+                const tedarik = cols[3].innerText.trim();
+                const durum = cols[4].innerText.trim();
+
+                tumDepoVerileri.push({ isim, raf, durum, resimUrl, detayUrl, operasyon, tedarik });
+            }
+        });
+
+        setCache('depo', tumDepoVerileri); // CACHE'E KAYDET
+        renderDepo(tumDepoVerileri);
+        
+    } catch (err) {
+        listContainer.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--danger); font-weight:bold;">Hata: ${err.message}</div>`;
+    }
+}
+
+function filterDepo() {
+    const searchText = document.getElementById('depoSearchInput').value.toLowerCase();
+    if (searchText.trim() === "") {
+        renderDepo(tumDepoVerileri);
+        return;
+    }
+    const filtrelenmis = tumDepoVerileri.filter(p => 
+        p.isim.toLowerCase().includes(searchText) || 
+        p.raf.toLowerCase().includes(searchText) ||
+        p.durum.toLowerCase().includes(searchText)
+    );
+    renderDepo(filtrelenmis);
+}
+
+function renderDepo(urunler) {
+    const listContainer = document.getElementById('depoResults');
+    listContainer.innerHTML = '';
+
+    if (urunler.length === 0) {
+        listContainer.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--gray);">Sonuç bulunamadı.</div>';
+        return;
+    }
+
+    urunler.forEach(u => {
+        const durumSinifi = u.durum.toLowerCase().includes("üretimde") ? "status-uretim" : "status-tasfiye";
+        
+        const card = document.createElement('div');
+        card.className = 'depo-card';
+        
+        const imgContainer = document.createElement('div');
+        imgContainer.className = 'depo-img-container';
+        imgContainer.onclick = () => showImageModal(u.resimUrl);
+        imgContainer.innerHTML = u.resimUrl ? `<img src="${u.resimUrl}" loading="lazy" class="depo-img">` : `<div class="depo-img" style="background: #ccc;"></div>`;
+
+        const infoContainer = document.createElement('div');
+        infoContainer.className = 'depo-info';
+        infoContainer.innerHTML = `
+            <div class="depo-header">
+                <div class="depo-name">${u.isim}</div>
+                <div class="depo-tags">
+                    <span class="depo-raf">${u.raf}</span>
+                    <span class="depo-status ${durumSinifi}">${u.durum}</span>
+                </div>
+            </div>
+        `;
+
+        const detailBtn = document.createElement('button');
+        detailBtn.className = 'depo-detail-btn';
+        detailBtn.innerText = 'Detay';
+        detailBtn.style.border = 'none';
+        detailBtn.style.cursor = 'pointer';
+        detailBtn.onclick = () => showDepoDetail(u.detayUrl);
+
+        card.appendChild(imgContainer);
+        card.appendChild(infoContainer);
+        card.appendChild(detailBtn);
+        
+        listContainer.appendChild(card);
+    });
+}
+
+// --- DEPO PARÇA DETAYI ---
+let aktifParcaDetayUrl = "";
+
+async function showDepoDetail(detayUrl) {
+    aktifParcaDetayUrl = detayUrl;
+    const modalTitle = document.getElementById('depoDetailModalTitle');
+    if (modalTitle) modalTitle.innerText = "Parça Detayı";
+    const backBtn = document.getElementById('depoDetailBackBtn');
+    if (backBtn) backBtn.style.display = 'none';
+
+    openModal('depoDetailModal');
+    const content = document.getElementById('depoDetailContent');
+    
+    // CACHE KONTROLÜ
+    const cacheKey = 'parca_' + detayUrl.split('/').pop();
+    const cachedData = getCache(cacheKey);
+    if (cachedData) {
+        renderDepoDetailHTML(cachedData);
+        return;
+    }
+
+    content.innerHTML = '<div style="text-align:center; padding: 40px; font-weight: bold; color: var(--gray);">Parça detayları çekiliyor...</div>';
+
+    try {
+        const path = detayUrl.replace(/^\//, '');
+        const response = await fetchWithAuth(`${API_URL}?path=${encodeURIComponent(path)}`);
+        if (!response.ok) throw new Error("Sunucu hatası");
+        const htmlText = await response.text();
+        
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlText;
+        
+        let resimUrl = "";
+        let urunlerLinks = [];
+        let parcaKodu = "-", boyamaNotu = "-", stokAdedi = "-", toplamOp = "-";
+        let opKodlari = [];
+
+        const imgEl = tempDiv.querySelector('.ui.image img');
+        if (imgEl) resimUrl = imgEl.getAttribute('src').replace(/\\/g, '/');
+
+        const dts = tempDiv.querySelectorAll('dt');
+        dts.forEach(dt => {
+            const text = dt.innerText.trim();
+            let dd = dt.nextElementSibling;
+            while (dd && dd.tagName.toLowerCase() !== 'dd') { dd = dd.nextElementSibling; }
+            if (!dd) return;
+
+            if (text === 'Ürünler') {
+                const links = dd.querySelectorAll('a');
+                links.forEach(a => {
+                    urunlerLinks.push({ name: a.innerText.trim(), url: a.getAttribute('href') });
+                });
+            } else if (text === 'Parça Kodu') { parcaKodu = dd.innerText.trim(); }
+            else if (text === 'Boyama Notu') { boyamaNotu = dd.innerText.trim(); }
+            else if (text === 'Stok') { stokAdedi = dd.innerText.trim(); }
+            else if (text === 'Toplam Operasyon Sayısı') { toplamOp = dd.innerText.trim(); }
+            else if (text === 'Operasyon Kodları') {
+                const links = dd.querySelectorAll('a');
+                links.forEach(a => { opKodlari.push({ name: a.innerText.trim(), url: a.getAttribute('href') }); });
+            }
+        });
+
+        const dataToCache = { resimUrl, urunlerLinks, parcaKodu, boyamaNotu, stokAdedi, toplamOp, opKodlari };
+        setCache(cacheKey, dataToCache); // CACHE'E KAYDET
+        renderDepoDetailHTML(dataToCache);
+
+    } catch (err) {
+        content.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--danger); font-weight: bold;">Hata: ${err.message}</div>`;
+    }
+}
+
+function renderDepoDetailHTML(data) {
+    const content = document.getElementById('depoDetailContent');
+    const { resimUrl, urunlerLinks, parcaKodu, boyamaNotu, stokAdedi, toplamOp, opKodlari } = data;
+
+    let resimHtml = resimUrl ? `
+        <div style="text-align:center; margin-bottom: 16px;">
+            <img src="${resimUrl}" style="max-width: 100%; max-height: 250px; object-fit: contain; border-radius: 8px; cursor: pointer;" onclick="showImageModal('${resimUrl}')">
+        </div>
+    ` : '';
+
+    let urunlerHtml = '';
+    if (urunlerLinks.length > 0) {
+        urunlerHtml = `
+            <div class="detail-grid-item" style="grid-column: span 2; display: block;">
+                <span class="detail-label">Kullanıldığı Ürünler</span>
+                <div style="margin-top: 8px; max-height: 150px; overflow-y: auto;">
+                    ${urunlerLinks.map(u => `<a href="javascript:void(0)" onclick="showProductDetail('${u.url}')" style="display:block; color: var(--primary); text-decoration: none; margin-bottom: 4px; font-size: 13px;">${u.name}</a>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    let opKodlariHtml = opKodlari.length > 0 
+        ? opKodlari.map(o => `<a href="https://uys.edelkrone.com${o.url}" target="_blank" style="color: var(--primary); text-decoration: none; margin-right: 8px;">${o.name}</a>`).join('') 
+        : '-';
+
+    content.innerHTML = `
+        ${resimHtml}
+        <div class="detail-grid" style="grid-template-columns: 1fr 1fr;">
+            <div class="detail-grid-item"><span class="detail-label">Parça Kodu</span><span class="detail-value">${parcaKodu}</span></div>
+            <div class="detail-grid-item"><span class="detail-label">Stok Adedi</span><span class="detail-value">${stokAdedi}</span></div>
+            <div class="detail-grid-item"><span class="detail-label">Toplam Operasyon Sayısı</span><span class="detail-value">${toplamOp}</span></div>
+            <div class="detail-grid-item"><span class="detail-label">Operasyon Kodları</span><span class="detail-value">${opKodlariHtml}</span></div>
+            <div class="detail-grid-item" style="grid-column: span 2;">
+                <span class="detail-label">Boyama Notu</span>
+                <span class="detail-value" style="color: var(--danger); font-weight: bold;">${boyamaNotu}</span>
+            </div>
+            ${urunlerHtml}
+        </div>
+    `;
+}
+
+// --- ÜRÜN DETAYI ---
+async function showProductDetail(detayUrl) {
+    const modalTitle = document.getElementById('depoDetailModalTitle');
+    if (modalTitle) modalTitle.innerText = "Ürün Detayı";
+    const backBtn = document.getElementById('depoDetailBackBtn');
+    if (backBtn) backBtn.style.display = 'inline-block';
+
+    const content = document.getElementById('depoDetailContent');
+    
+    // CACHE KONTROLÜ
+    const cacheKey = 'urun_' + detayUrl.split('/').pop();
+    const cachedData = getCache(cacheKey);
+    if (cachedData) {
+        renderProductDetailHTML(cachedData);
+        return;
+    }
+
+    content.innerHTML = '<div style="text-align:center; padding: 40px;">Ürün detayları çekiliyor...</div>';
+
+    try {
+        const path = detayUrl.replace(/^\//, '');
+        const response = await fetchWithAuth(`${API_URL}?path=${encodeURIComponent(path)}`);
+        if (!response.ok) throw new Error("Sunucu hatası");
+        const htmlText = await response.text();
+        
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlText;
+        
+        let resimUrl = "";
+        let urunAdi = "-", montajSemasi = null;
+
+        const imgEl = tempDiv.querySelector('.ui.image img');
+        if (imgEl) resimUrl = imgEl.getAttribute('src').replace(/\\/g, '/');
+
+        const dts = tempDiv.querySelectorAll('dt');
+        dts.forEach(dt => {
+            const text = dt.innerText.trim();
+            let dd = dt.nextElementSibling;
+            while (dd && dd.tagName.toLowerCase() !== 'dd') { dd = dd.nextElementSibling; }
+            if (!dd) return;
+
+            if (text === 'Ürün Adı') { urunAdi = dd.innerText.trim(); }
+            else if (text === 'Montaj Şeması') {
+                const link = dd.querySelector('a');
+                if (link) montajSemasi = link.getAttribute('href');
+            }
+        });
+
+        const dataToCache = { resimUrl, urunAdi, montajSemasi };
+        setCache(cacheKey, dataToCache); // CACHE'E KAYDET
+        renderProductDetailHTML(dataToCache);
+
+    } catch (err) {
+        content.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--danger); font-weight: bold;">Hata: ${err.message}</div>`;
+    }
+}
+
+function renderProductDetailHTML(data) {
+    const content = document.getElementById('depoDetailContent');
+    const { resimUrl, urunAdi, montajSemasi } = data;
+
+    let resimHtml = resimUrl ? `
+        <div style="text-align:center; margin-bottom: 16px;">
+            <img src="${resimUrl}" style="max-width: 100%; max-height: 250px; object-fit: contain; border-radius: 8px; cursor: pointer;" onclick="showImageModal('${resimUrl}')">
+        </div>
+    ` : '';
+
+    let montajHtml = montajSemasi ? `
+        <div class="detail-grid-item" style="grid-column: span 2;">
+            <span class="detail-label">Montaj Şeması</span>
+            <span class="detail-value">
+                <a href="${montajSemasi}" target="_blank" style="color: var(--primary); text-decoration: none; font-weight: bold;">📄 Görüntüle</a>
+            </span>
+        </div>
+    ` : '';
+
+    content.innerHTML = `
+        ${resimHtml}
+        <div class="detail-grid" style="grid-template-columns: 1fr;">
+            <div class="detail-grid-item">
+                <span class="detail-label">Ürün Adı</span>
+                <span class="detail-value">${urunAdi}</span>
+            </div>
+            ${montajHtml}
+        </div>
+    `;
+}
+
+function goBackToPartDetail() {
+    if (aktifParcaDetayUrl) {
+        showDepoDetail(aktifParcaDetayUrl);
+    }
+}
+
+// Resmi tam ekran gösterme modalı
+function showImageModal(url) {
+    if (!url) return;
+    const eskiModal = document.getElementById('fullImageModal');
+    if (eskiModal) eskiModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'fullImageModal';
+    modal.className = 'modal-overlay active';
+    modal.style.zIndex = '9999';
+    modal.style.background = 'rgba(0,0,0,0.85)'; 
+    
+    modal.innerHTML = `
+        <div style="position:relative; width:100%; height:100%; display:flex; justify-content:center; align-items:center;">
+            <img src="${url}" style="max-width:95%; max-height:95%; object-fit:contain; border-radius:8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
+            <button onclick="document.getElementById('fullImageModal').remove()" style="position:absolute; top: 20px; right: 20px; background: var(--danger); color: white; border: none; padding: 10px 15px; border-radius: 50%; font-size: 20px; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">✖</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+// --- TAKVİM MODALI ---
+let calDate = new Date();
+function renderCalendar() {
+    const monthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+    const monthYearEl = document.getElementById('calendarMonthYear');
+    if (monthYearEl) monthYearEl.innerText = `${monthNames[calDate.getMonth()]} ${calDate.getFullYear()}`;
+    
+    const grid = document.getElementById('calendarGrid');
+    if (!grid) return;
+    
+    grid.innerHTML = '';
+    ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].forEach(d => {
+        const el = document.createElement('div'); el.className = 'calendar-day-name'; el.innerText = d; grid.appendChild(el);
+    });
+
+    const firstDay = new Date(calDate.getFullYear(), calDate.getMonth(), 1).getDay();
+    const daysInMonth = new Date(calDate.getFullYear(), calDate.getMonth() + 1, 0).getDate();
+    const today = new Date();
+    
+    let emptyDays = firstDay === 0 ? 6 : firstDay - 1;
+    for (let i = 0; i < emptyDays; i++) grid.appendChild(document.createElement('div'));
+
+    for (let i = 1; i <= daysInMonth; i++) {
+        const el = document.createElement('div');
+        el.className = 'calendar-day'; el.innerText = i;
+        if (i === today.getDate() && calDate.getMonth() === today.getMonth() && calDate.getFullYear() === today.getFullYear()) {
+            el.classList.add('today');
+        }
+        grid.appendChild(el);
+    }
+}
+function changeMonth(dir) { calDate.setMonth(calDate.getMonth() + dir); renderCalendar(); }
+renderCalendar();
+
+// --- HAVA DURUMU ---
+function getWeatherIcon(code) {
+    if (code === 0) return '☀️'; if (code >= 1 && code <= 3) return '⛅'; if (code === 45 || code === 48) return '🌫️';
+    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return '🌧️'; if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) return '❄️';
+    if (code >= 95) return '⛈️'; return '☁️';
+}
+async function fetchWeather() {
+    try {
+        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=39.93&longitude=32.86&current_weather=true&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=Europe/Istanbul');
+        const data = await res.json();
+        const current = data.current_weather;
+        const temp = Math.round(current.temperature);
+        
+        document.getElementById('topWeatherIcon').innerText = getWeatherIcon(current.weathercode);
+        document.getElementById('topWeatherTemp').innerText = `${temp}°`;
+        document.getElementById('wIcon').innerText = getWeatherIcon(current.weathercode);
+        document.getElementById('wTemp').innerText = `${temp}°`;
+        document.getElementById('wCondition').innerText = `Ankara · ${current.weathercode === 0 ? 'Açık' : 'Bulutlu'}`;
+        
+        const forecastDiv = document.getElementById('weatherForecast');
+        forecastDiv.innerHTML = '';
+        const days = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(data.daily.time[i]);
+            forecastDiv.innerHTML += `
+                <div class="weather-day">
+                    <div class="day-name">${days[d.getDay()]}</div><div class="icon">${getWeatherIcon(data.daily.weathercode[i])}</div>
+                    <div class="max-t">${Math.round(data.daily.temperature_2m_max[i])}°</div><div class="min-t">${Math.round(data.daily.temperature_2m_min[i])}°</div>
+                </div>`;
+        }
+    } catch (e) { console.error("Hava durumu alınamadı", e); }
+}
+fetchWeather();
+
+// --- API MOTORU SEÇİMİ ---
+function selectEngine(engine) {
+    const btnGemini = document.getElementById('engineGemini');
+    const btnGroq = document.getElementById('engineGroq');
+    if (engine === 'gemini') { btnGemini.classList.add('active-engine'); btnGroq.classList.remove('active-engine'); }
+    else { btnGroq.classList.add('active-engine'); btnGemini.classList.remove('active-engine'); }
+}
+
+// --- API KEY KAYDETME ---
+function saveApiKey() {
+    const apiKeyInput = document.querySelector('#apiKeyModal input[type="password"]');
+    const selectedEngine = document.getElementById('engineGemini').classList.contains('active-engine') ? 'gemini' : 'groq';
+    
+    if (!apiKeyInput || !apiKeyInput.value) {
+        showInfoModal("Uyarı", "Lütfen bir API anahtarı girin.");
+        return;
+    }
+
+    localStorage.setItem('aiEngine', selectedEngine);
+    localStorage.setItem('aiApiKey', apiKeyInput.value);
+    
+    closeModal('apiKeyModal');
+    showInfoModal("Başarılı", "API anahtarı kaydedildi. AI artık hazır!");
+}
+
+// --- AI İÇİN SAYFA BAĞLAMINI HAZIRLA (GÜNCEL) ---
+function getCurrentPageContext() {
+    // Eğer Parti Detay AI butonundan gelinmişse o veriyi kullan
+    if (partyDetailContextForAI) {
+        return "Parti Detayı Ekranındaki Veriler:\n" + partyDetailContextForAI;
+    }
+    
+    // Diğer sayfalar için normal mantık
+    else if (!document.getElementById('operatorAtamalariScreen').classList.contains('hidden')) {
+        let context = "Operatör Atamaları Ekranındaki Veriler:\n";
+        const cards = document.querySelectorAll('#operatorList .operator-card');
+        cards.forEach(card => {
+            const name = card.querySelector('.op-name')?.innerText || "";
+            const benchCount = card.querySelector('.op-count')?.innerText || "";
+            context += `Operatör: ${name}, Atandığı Tezgah: ${benchCount}\n`;
+        });
+        return context;
+    } else if (!document.getElementById('ayarciAtamalariScreen').classList.contains('hidden')) {
+        let context = "Ayarcı Atamaları Ekranındaki Veriler:\n";
+        const cards = document.querySelectorAll('#ayarciList .ayarci-card');
+        cards.forEach(card => {
+            const name = card.querySelector('.ayarci-name')?.innerText || "";
+            const unvan = card.querySelector('.ayarci-unvan')?.innerText || "";
+            const rows = card.querySelectorAll('.ayarci-table tbody tr');
+            let rowText = "";
+            rows.forEach(r => {
+                const cols = r.querySelectorAll('td');
+                rowText += `Tezgah: ${cols[1].innerText}, Parça: ${cols[2].innerText}, Parti: ${cols[3].innerText}\n`;
+            });
+            context += `Ayarcı: ${name} (${unvan}), Atamaları: ${rowText}\n`;
+        });
+        return context;
+    } else if (!document.getElementById('aktifPartilerScreen').classList.contains('hidden')) {
+        let context = "Aktif Partiler Ekranındaki Veriler:\n";
+        const cards = document.querySelectorAll('#partyList .party-card');
+        cards.forEach(card => {
+            const tezgah = card.querySelector('.party-tezgah')?.innerText || "";
+            const info = card.querySelector('.party-info')?.innerText || "";
+            const op = card.querySelector('.party-operator')?.innerText || "";
+            const sure = card.querySelector('.party-time')?.innerText || "";
+            const percent = card.querySelector('.party-percent')?.innerText || "";
+            context += `Tezgah: ${tezgah}, İş: ${info}, Operatör: ${op}, Kalan Süre: ${sure}, Durum: ${percent}\n`;
+        });
+        return context;
+    } else {
+        return "Ana Ekran. Şu an özel bir veri yok.";
+    }
+}
+// --- PARTİ DETAY AI BUTONU ---
+let partyDetailContextForAI = ""; // AI için detay verisini tutar
+
+function openPartyDetailAI() {
+    // AI butonuna basıldığında, detay modalının içeriğini hafızaya al
+    partyDetailContextForAI = document.getElementById('partyDetailContent').innerText;
+    
+    closeModal('partyDetailModal'); // Detay modalını kapat
+    openModal('aiChatModal'); // AI sohbeti aç
+}
+
+// --- AI SOHBET (GÜNCEL) ---
+async function sendAIMessage() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim(); 
+    if (!text) return;
+    
+    const history = document.getElementById('chatHistory');
+    history.innerHTML += `<div class="chat-msg user">${text}</div>`;
+    input.value = ''; history.scrollTop = history.scrollHeight;
+    
+    const loadingId = 'loading-' + Date.now();
+    history.innerHTML += `<div class="chat-msg ai" id="${loadingId}">Düşünüyor...</div>`;
+    history.scrollTop = history.scrollHeight;
+
+    const engine = localStorage.getItem('aiEngine') || 'gemini';
+    const apiKey = localStorage.getItem('aiApiKey');
+
+    if (!apiKey) {
+        document.getElementById(loadingId).remove();
+        history.innerHTML += `<div class="chat-msg ai" style="color: red;">Lütfen önce Ayarlar kısmından API Key girin.</div>`;
+        return;
+    }
+
+    const pageContext = getCurrentPageContext();
+
+    try {
+        let aiResponse = "";
+
+        if (engine === 'gemini') {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: `Sen bir web sayfası asistanısın. Kullanıcının sorduğu soruyu, aşağıda verilen web sayfası içeriğine göre cevapla.\n\nSAYFA İÇERİĞİ:\n${pageContext}\n\nSORU: ${text}` }] }]
+            };
+            const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error?.message || "Gemini API hatası");
+            aiResponse = data.candidates[0].content.parts[0].text;
+        } else {
+            const url = `https://api.groq.com/openai/v1/chat/completions`;
+            const payload = {
+                model: "openai/gpt-oss-120b",
+                messages: [
+                    { role: "system", content: "Sen bir web sayfası asistanısın. Kullanıcının sorduğu soruyu, verilen web sayfası içeriğine göre cevapla." },
+                    { role: "user", content: `SAYFA İÇERİĞİ:\n${pageContext}\n\nSORU: ${text}` }
+                ]
+            };
+            const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error?.message || "Groq API hatası");
+            aiResponse = data.choices[0].message.content;
+        }
+
+        document.getElementById(loadingId).remove();
+        history.innerHTML += `<div class="chat-msg ai">${aiResponse}</div>`;
+        history.scrollTop = history.scrollHeight;
+
+    } catch (err) {
+        document.getElementById(loadingId).remove();
+        history.innerHTML += `<div class="chat-msg ai" style="color: red;">Hata: ${err.message}</div>`;
+    }
+}
+
+// --- SAYFA YÜKLENDİĞİNDE ---
+window.addEventListener('DOMContentLoaded', () => {
+    updateLoggedInUserUI();
+    const loggedInUser = localStorage.getItem('loggedInUser');
+    if (!loggedInUser) {
+        openModal('loginModal');
+    } else {
+        closeModal('loginModal');
+    }
+});
+
+// --- AYARCI ATAMALARI ---
+async function fetchAyarcilar() {
+    const listContainer = document.getElementById('ayarciList');
+    const countText = document.getElementById('ayarciCount');
+    
+    // CACHE KONTROLÜ
+    const cachedData = getCache('ayarcilar');
+    if (cachedData) {
+        renderAyarcilar(cachedData);
+        return;
+    }
+
+    listContainer.innerHTML = '<div style="text-align:center; padding: 40px; font-weight:bold; color: var(--gray);">Ayarcılar ve detaylar çekiliyor, lütfen bekleyin...</div>';
+    countText.innerText = "Yükleniyor...";
+
+    try {
+        // 1. Ana Liste Çekilir
+        const response = await fetchWithAuth(`${API_URL}?path=Manufacturing/Workbenches/TunerAssignments`);
+        if (!response.ok) throw new Error("Sunucu hatası");
+        const htmlText = await response.text();
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, "text/html");
+        const cards = doc.querySelectorAll('.ui.inverted.card');
+        let ayarciData = [];
+
+        // 2. Kartlar Ayrıştırılır
+        for (const card of cards) {
+            const isimEl = card.querySelector('.center.aligned.header span');
+            const isim = isimEl ? isimEl.innerText.trim() : "Bilinmeyen";
+            
+            const unvanEl = card.querySelectorAll('.center.aligned.header span')[1];
+            const unvan = unvanEl ? unvanEl.innerText.trim() : "";
+
+            const imgEl = card.querySelector('.image img');
+            const foto = imgEl ? imgEl.getAttribute('src') : "";
+
+            let satirlar = [];
+            const rows = card.querySelectorAll('.ui.grid > .row');
+            
+            // 3. Satırlar ve Tezgah Linkleri Toplanır
+            const rowPromises = Array.from(rows).map(async (row) => {
+                const cols = row.querySelectorAll('.column');
+                if (cols.length >= 4) {
+                    const tezgahLink = cols[1].querySelector('a');
+                    if (tezgahLink) {
+                        const tezgah = tezgahLink.innerText.trim();
+                        const tezgahUrl = tezgahLink.getAttribute('href');
+                        let partiNo = cols[3].innerText.trim();
+                        let parcaAdi = "";
+                        let resimUrl = "";
+
+                        // Kotlin Mantığı: Sayı değilse parça adıdır
+                        if (isNaN(parseInt(partiNo))) { 
+                            parcaAdi = partiNo; 
+                            partiNo = "-"; 
+                        }
+
+                        // 4. Detay Sayfasına Gidilir (Eğer link varsa)
+                        if (tezgahUrl) {
+                            try {
+                                const detayRes = await fetchWithAuth(`${API_URL}?path=${encodeURIComponent(tezgahUrl.replace(/^\//, ''))}`);
+                                const detayHtml = await detayRes.text();
+                                const detayDoc = parser.parseFromString(detayHtml, "text/html");
+                                
+                                // Resim Çekilir
+                                const detayImg = detayDoc.querySelector('.ui.fluid.card .ui.image img');
+                                if (detayImg) resimUrl = detayImg.getAttribute('src').replace(/\\/g, '/');
+
+                                // Parça Adı Çekilir (Eğer ana listeden gelmediyse)
+                                if (!parcaAdi) {
+                                    const dtElements = detayDoc.querySelectorAll('dt');
+                                    for (let dt of dtElements) {
+                                        if (dt.innerText.includes('Operasyon Adı')) {
+                                            parcaAdi = dt.nextElementSibling?.innerText.trim() || "";
+                                            break;
+                                        }
+                                    }
+                                }
+                            } catch (e) { console.log("Detay çekilemedi:", tezgahUrl); }
+                        }
+
+                        return { tezgah, partiNo, tezgahUrl, parcaAdi, resimUrl };
+                    }
+                }
+                return null;
+            });
+
+            // Satırların detay çekme işlemleri biter
+            const sonuclar = await Promise.all(rowPromises);
+            satirlar = sonuclar.filter(s => s !== null);
+
+            ayarciData.push({ isim, unvan, foto, satirlar });
+        }
+
+        setCache('ayarcilar', ayarciData); // CACHE'E KAYDET
+        renderAyarcilar(ayarciData);
+        
+    } catch (err) {
+        listContainer.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--danger); font-weight:bold;">Hata: ${err.message}</div>`;
+        countText.innerText = "Bağlantı Hatası";
+    }
+}
+
+function renderAyarcilar(ayarcilar) {
+    const listContainer = document.getElementById('ayarciList');
+    const countText = document.getElementById('ayarciCount');
+    listContainer.innerHTML = '';
+    
+    countText.innerText = `Toplam Ayarcı: ${ayarcilar.length}`;
+
+    if (ayarcilar.length === 0) {
+        listContainer.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--gray);">Atanmış ayarcı bulunamadı.</div>';
+        return;
+    }
+
+    ayarcilar.forEach(ayarci => {
+        const imgHtml = ayarci.foto ? `<img src="${ayarci.foto}" class="ayarci-img" onerror="this.style.display='none'">` : `<div class="ayarci-img"></div>`;
+        
+        let tableHtml = '';
+        if (ayarci.satirlar.length > 0) {
+            let rowsHtml = '';
+           ayarci.satirlar.forEach(s => {
+                // Resim varsa göster, yoksa boş gri kutu
+                const imgCell = s.resimUrl ? `<img src="${s.resimUrl}" class="ayarci-img-thumb" onclick="showImageModal('${s.resimUrl}')">` : `<div class="ayarci-img-thumb"></div>`;
+                
+                // Parça Adı varsa göster, yoksa "-"
+                const parcaText = s.parcaAdi ? s.parcaAdi : "-";
+                
+                // İş Adı'na link ver (Eğer partiNo varsa ve sayıysa)
+                let isAdiHtml = parcaText;
+                if (s.partiNo && s.partiNo !== "-" && !isNaN(parseInt(s.partiNo))) {
+                    const partiDetayUrl = `https://uys.edelkrone.com/Manufacturing/ProductionBatches/Details/${s.partiNo}`;
+                    isAdiHtml = `<a href="${partiDetayUrl}" target="_blank" style="color: var(--primary); text-decoration: none; font-weight: bold;">${parcaText}</a>`;
+                }
+                
+                // Tezgah Adını geri getirdik!
+                rowsHtml += `
+                    <tr>
+                        <td style="text-align:center; width: 50px;">${imgCell}</td>
+                        <td><b style="color: var(--primary);">${s.tezgah}</b></td> <!-- Tezgah Adı (4A) Burada -->
+                        <td class="ayarci-parti-text">${isAdiHtml}</td> <!-- İş Adı (Linkli) -->
+                        <td class="ayarci-parti-text">${s.partiNo}</td> <!-- Parti No -->
+                    </tr>
+                `;
+            });
+
+            tableHtml = `
+                <table class="ayarci-table">
+                    <thead>
+                        <tr>
+                            <th style="text-align:center;"></th>
+                            <th>Tezgah</th>
+                            <th>Parça</th>
+                            <th>Parti No</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        const card = document.createElement('div');
+        card.className = 'ayarci-card';
+        card.innerHTML = `
+            ${imgHtml}
+            <div class="ayarci-name">${ayarci.isim}</div>
+            <div class="ayarci-unvan">${ayarci.unvan}</div>
+            ${tableHtml}
+        `;
+        listContainer.appendChild(card);
+    });
+}
+
+// =========================================
+// HESAP MAKİNESİ MANTIĞI
+// =========================================
+
+// Ekran geçişleri (Animasyonsuz, anlık)
+const views = {
+    calc: document.getElementById('calc-view'),
+    merkez: document.getElementById('merkez-view'),
+    dairesel: document.getElementById('dairesel-view')
+};
+
+function goTo(target) {
+    // Tüm panelleri gizle
+    Object.values(views).forEach(v => v.classList.remove('active'));
+    
+    // İstenen paneli göster
+    if (views[target]) {
+        views[target].classList.add('active');
+    }
+}
+
+// Buton atamaları
+document.getElementById('open-merkez').onclick = () => goTo('merkez');
+document.getElementById('open-dairesel').onclick = () => goTo('dairesel');
+document.getElementById('close-merkez').onclick = () => goTo('calc');
+document.getElementById('close-dairesel').onclick = () => goTo('calc');
+
+// --- HESAP MAKİNESİ MOTORU ---
+class CalcEngine {
+    constructor(displayEl, historyEl) {
+        this.displayEl = displayEl; this.historyEl = historyEl;
+        this.current = '0'; this.previous = null; this.operation = null; this.resetScreen = false;
+        this.update();
+    }
+    update() {
+        let displayText = this.current;
+        if (displayText !== 'Error') {
+            let [int, dec] = displayText.split('.');
+            int = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            displayText = dec ? int + '.' + dec : int;
+        }
+        this.displayEl.textContent = displayText;
+        this.historyEl.textContent = this.operation ? `${this.previous} ${this.getOpSym(this.operation)}` : '';
+    }
+    getOpSym(op) {
+        const syms = { add: '+', subtract: '-', multiply: '×', divide: '÷' };
+        return syms[op] || '';
+    }
+    clear() { this.current = '0'; this.previous = this.operation = null; this.resetScreen = false; this.update(); }
+    sign() { this.current = (parseFloat(this.current) * -1).toString(); this.update(); }
+    backspace() {
+        if (this.current === 'Error') { this.clear(); return; }
+        if (this.current.length === 1 || (this.current.length === 2 && this.current.startsWith('-'))) this.current = '0';
+        else this.current = this.current.slice(0, -1); this.update();
+    }
+    append(n) {
+        if (this.resetScreen || this.current === '0' || this.current === 'Error') { this.current = n; this.resetScreen = false; }
+        else this.current += n; this.update();
+    }
+    decimal() {
+        if (this.resetScreen) { this.current = '0.'; this.resetScreen = false; }
+        else if (this.current === 'Error') { this.current = '0.'; }
+        else if (!this.current.includes('.')) this.current += '.'; this.update();
+    }
+    chooseOp(op) {
+        if (this.operation) this.calculate();
+        this.previous = this.current; this.operation = op; this.resetScreen = true; this.update();
+    }
+    calculate() {
+        if (!this.operation || this.previous === null) return;
+        const prev = parseFloat(this.previous), cur = parseFloat(this.current);
+        if (isNaN(prev) || isNaN(cur)) return;
+        let result;
+        switch (this.operation) {
+            case 'add': result = prev + cur; break;
+            case 'subtract': result = prev - cur; break;
+            case 'multiply': result = prev * cur; break;
+            case 'divide': result = cur === 0 ? 'Error' : prev / cur; break;
+        }
+        if (result !== 'Error') result = parseFloat(result.toPrecision(12));
+        this.current = result.toString(); this.operation = null; this.resetScreen = true; this.update();
+    }
+}
+
+// Hesap makinesini başlat
+const mainCalc = new CalcEngine(document.getElementById('display'), document.getElementById('history'));
+document.getElementById('calc-view').addEventListener('click', e => {
+    const btn = e.target.closest('.button'); if (!btn) return;
+    const action = btn.dataset.action, num = btn.dataset.num;
+    if (num !== undefined) mainCalc.append(num);
+    else switch (action) {
+        case 'clear': mainCalc.clear(); break;
+        case 'backspace': mainCalc.backspace(); break;
+        case 'sign': mainCalc.sign(); break;
+        case 'decimal': mainCalc.decimal(); break;
+        case 'add': case 'subtract': case 'multiply': case 'divide': mainCalc.chooseOp(action); break;
+        case 'equals': mainCalc.calculate(); break;
+    }
+});
+
+// --- KEYPAD VE FORM MANTIĞI ---
+let activeInputEl = null;
+
+function setActiveInput(el) {
+    if (activeInputEl) activeInputEl.classList.remove('active-input');
+    activeInputEl = el;
+    if (activeInputEl) activeInputEl.classList.add('active-input');
+}
+
+function setupKeypad(keypadId, inputSelectors) {
+    const keypad = document.getElementById(keypadId);
+    if (!keypad) return;
+
+    const allInputs = [];
+    inputSelectors.forEach(sel => {
+        const el = document.querySelector(sel);
+        if (el) allInputs.push(el);
+    });
+
+    allInputs.forEach(input => {
+        input.addEventListener('focus', () => setActiveInput(input));
+        input.addEventListener('click', () => setActiveInput(input));
+    });
+
+    keypad.addEventListener('click', (e) => {
+        const btn = e.target.closest('.keypad-btn'); if (!btn) return;
+        if (!activeInputEl || activeInputEl.disabled) return;
+
+        const num = btn.dataset.num;
+        const action = btn.dataset.action;
+
+        if (num !== undefined) {
+            activeInputEl.value += num;
+            triggerInputChange(activeInputEl);
+        } else if (action === 'del') {
+            activeInputEl.value = activeInputEl.value.slice(0, -1);
+            triggerInputChange(activeInputEl);
+        } else if (action === 'dot') {
+            if (!activeInputEl.value.includes('.')) {
+                if (activeInputEl.value === '') activeInputEl.value = '0.';
+                else activeInputEl.value += '.';
+            }
+            triggerInputChange(activeInputEl);
+        }
+    });
+}
+
+function triggerInputChange(inputEl) {
+    const event = new Event('input', { bubbles: true });
+    inputEl.dispatchEvent(event);
+    if (inputEl.id === 'merkez-olcusu' || inputEl.id === 'tam-cap-custom') merkezHesap();
+    if (inputEl.id === 'pcd-radius' || inputEl.id === 'hole-count-custom' || inputEl.id === 'hole-diam-custom') daireselHesap();
+}
+
+// --- MERKEZ HESAPLAMA ---
+function merkezHesap() {
+    let tamCap;
+    const tamCapChecked = document.querySelector('input[name="tam-cap"]:checked');
+    if (!tamCapChecked) { tamCap = NaN; }
+    else if (tamCapChecked.value === 'custom') { tamCap = parseFloat(document.getElementById('tam-cap-custom').value.replace(',', '.')); }
+    else { tamCap = parseFloat(tamCapChecked.value); }
+    
+    const merk = parseFloat(document.getElementById('merkez-olcusu').value.replace(',', '.'));
+    document.getElementById('merkez-sonuc').textContent = (isNaN(tamCap) || isNaN(merk)) ? '-' : (merk - tamCap / 2).toFixed(2) + " mm";
+}
+
+document.querySelectorAll('input[name="tam-cap"]').forEach(r => {
+    r.addEventListener('change', function () {
+        const customInput = document.getElementById('tam-cap-custom');
+        if (this.value === 'custom') {
+            customInput.disabled = false; customInput.readOnly = false; customInput.focus();
+        } else {
+            customInput.disabled = true; customInput.readOnly = true; customInput.value = '';
+        }
+        merkezHesap();
+    });
+});
+document.getElementById('tam-cap-custom').addEventListener('input', merkezHesap);
+document.getElementById('merkez-olcusu').addEventListener('input', merkezHesap);
+
+document.getElementById('merkez-temizle').onclick = () => {
+    document.querySelector('input[name="tam-cap"][value="2.5"]').checked = true;
+    const custom = document.getElementById('tam-cap-custom');
+    custom.value = ''; custom.disabled = true; custom.readOnly = true;
+    document.getElementById('merkez-olcusu').value = '';
+    document.getElementById('merkez-sonuc').textContent = '-';
+    setActiveInput(document.getElementById('merkez-olcusu'));
+};
+
+// --- DAİRESEL HESAPLAMA ---
+function daireselHesap() {
+    const radius = parseFloat(document.getElementById('pcd-radius').value.replace(',', '.'));
+
+    let count;
+    const countChecked = document.querySelector('input[name="hole-count"]:checked');
+    if (!countChecked) { count = NaN; }
+    else if (countChecked.value === 'custom') { count = parseFloat(document.getElementById('hole-count-custom').value.replace(',', '.')); }
+    else { count = parseFloat(countChecked.value); }
+
+    let diam;
+    const diamChecked = document.querySelector('input[name="hole-diam"]:checked');
+    if (!diamChecked) { diam = NaN; }
+    else if (diamChecked.value === 'custom') { diam = parseFloat(document.getElementById('hole-diam-custom').value.replace(',', '.')); }
+    else { diam = parseFloat(diamChecked.value); }
+
+    if (isNaN(count) || isNaN(radius) || isNaN(diam) || count < 2) {
+        document.getElementById('center-to-center').textContent = '-';
+        document.getElementById('outer-distance').textContent = '-';
+        return;
+    }
+    const center2 = 2 * radius * Math.sin((180 / count) * (Math.PI / 180));
+    document.getElementById('center-to-center').textContent = center2.toFixed(2) + ' mm';
+    document.getElementById('outer-distance').textContent = (center2 + diam).toFixed(2) + ' mm';
+}
+
+document.getElementById('pcd-radius').addEventListener('input', daireselHesap);
+
+document.querySelectorAll('input[name="hole-count"]').forEach(r => {
+    r.addEventListener('change', function () {
+        const customInput = document.getElementById('hole-count-custom');
+        if (this.value === 'custom') {
+            customInput.disabled = false; customInput.readOnly = false; customInput.focus();
+        } else {
+            customInput.disabled = true; customInput.readOnly = true; customInput.value = '';
+        }
+        daireselHesap();
+    });
+});
+document.getElementById('hole-count-custom').addEventListener('input', daireselHesap);
+
+document.querySelectorAll('input[name="hole-diam"]').forEach(r => {
+    r.addEventListener('change', function () {
+        const customInput = document.getElementById('hole-diam-custom');
+        if (this.value === 'custom') {
+            customInput.disabled = false; customInput.readOnly = false; customInput.focus();
+        } else {
+            customInput.disabled = true; customInput.readOnly = true; customInput.value = '';
+        }
+        daireselHesap();
+    });
+});
+document.getElementById('hole-diam-custom').addEventListener('input', daireselHesap);
+
+document.getElementById('dairesel-temizle').onclick = () => {
+    document.getElementById('pcd-radius').value = '';
+    document.querySelector('input[name="hole-count"][value="2"]').checked = true;
+    const hcCustom = document.getElementById('hole-count-custom');
+    hcCustom.value = ''; hcCustom.disabled = true; hcCustom.readOnly = true;
+    document.querySelector('input[name="hole-diam"][value="2.5"]').checked = true;
+    const hdCustom = document.getElementById('hole-diam-custom');
+    hdCustom.value = ''; hdCustom.disabled = true; hdCustom.readOnly = true;
+    daireselHesap();
+    setActiveInput(document.getElementById('pcd-radius'));
+};
+
+// Input aktiflik dinleyicileri
+document.getElementById('merkez-olcusu').addEventListener('click', function () { setActiveInput(this); });
+document.getElementById('pcd-radius').addEventListener('click', function () { setActiveInput(this); });
+
+// Keypad'leri başlat
+setupKeypad('merkez-keypad', ['#merkez-olcusu', '#tam-cap-custom']);
+setupKeypad('dairesel-keypad', ['#pcd-radius', '#hole-count-custom', '#hole-diam-custom']);
+
+// Varsayılan aktif input
+setActiveInput(document.getElementById('merkez-olcusu'));
+
+// --- YENİ PARTİ BAŞLAT (KAZIMA) ---
+async function fetchYeniPartiler() {
+    const listContainer = document.getElementById('yeniPartiList');
+    const countText = document.getElementById('yeniPartiCount');
+    
+    // CACHE KONTROLÜ
+    const cachedData = getCache('yeniPartiler');
+    if (cachedData) {
+        renderYeniPartiler(cachedData);
+        return;
+    }
+
+    listContainer.innerHTML = '<div style="text-align:center; padding: 40px; font-weight:bold; color: var(--gray);">Yeni partiler çekiliyor...</div>';
+    countText.innerText = "Yükleniyor...";
+
+    try {
+        const response = await fetchWithAuth(`${API_URL}?path=Manufacturing/ProductionBatches/ProductionList`);
+        if (!response.ok) throw new Error("Sunucu hatası");
+        const htmlText = await response.text();
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, "text/html");
+        
+        // Sayfadaki tüm kartları bul
+        const cards = doc.querySelectorAll('.ui.card');
+        let partiData = [];
+
+                cards.forEach(card => {
+            // Tezgah Adı
+            const tezgahEl = card.querySelector('h3.center.aligned.header');
+            const tezgah = tezgahEl ? tezgahEl.innerText.trim() : "Bilinmeyen";
+
+            // YENİ EKLENEN: Resim URL'sini Çek
+           const imgEl = card.querySelector('img.ui.centered.image');
+let resimUrl = "";
+if (imgEl) {
+    resimUrl = imgEl.getAttribute('src').replace(/\\/g, '/');
+}
+
+            let parcaAdi = "-", partiNo = "-", uretilecek = "-", tahminiSure = "-", teknikResim = "";
+            // ... geri kalan kod aynı
+
+            const dts = card.querySelectorAll('dt');
+            dts.forEach(dt => {
+                const text = dt.innerText.trim();
+                const dd = dt.nextElementSibling;
+                if (!dd) return;
+                
+                // dd içindeki değer (link varsa linkin metni, yoksa düz metin)
+                const val = dd.querySelector('a') ? dd.querySelector('a').innerText.trim() : dd.innerText.trim();
+
+                if (text.includes('Parti No')) partiNo = val;
+                else if (text.includes('Operasyon Adı')) parcaAdi = val;
+                else if (text.includes('Üretilecek Miktar')) uretilecek = val;
+                else if (text.includes('Tahmini Süre')) tahminiSure = val;
+                else if (text.includes('Teknik Resim')) {
+                    const link = dd.querySelector('a');
+                    if (link) teknikResim = link.getAttribute('href');
+                }
+            });
+
+                        partiData.push({ tezgah, parcaAdi, partiNo, uretilecek, tahminiSure, teknikResim, resimUrl });
+        });
+
+        setCache('yeniPartiler', partiData); // CACHE'E KAYDET
+        renderYeniPartiler(partiData);
+        
+    } catch (err) {
+        listContainer.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--danger); font-weight:bold;">Hata: ${err.message}</div>`;
+        countText.innerText = "Bağlantı Hatası";
+    }
+}
+
+function renderYeniPartiler(partiler) {
+    const listContainer = document.getElementById('yeniPartiList');
+    const countText = document.getElementById('yeniPartiCount');
+    listContainer.innerHTML = '';
+    
+    countText.innerText = `Toplam Yeni Parti: ${partiler.length}`;
+
+    if (partiler.length === 0) {
+        listContainer.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--gray);">Yeni parti bulunamadı.</div>';
+        return;
+    }
+
+    partiler.forEach(p => {
+                let resimBtn = p.teknikResim 
+            ? `<a href="${p.teknikResim}" target="_blank" class="yp-btn-resim">📄 Teknik Resim</a>` 
+            : `<span style="color: gray; font-size: 12px;">Teknik Resim Yok</span>`;
+
+        // Resim HTML'i (Üstte, ortalı ve büyük)
+        let imgHtml = p.resimUrl 
+            ? `<div style="text-align: center; margin-bottom: 16px;">
+                 <img src="${p.resimUrl}" style="max-width: 100%; max-height: 250px; object-fit: contain; border-radius: 8px; background: #f0f0f0; padding: 4px;">
+               </div>` 
+            : '';
+
+        const card = document.createElement('div');
+        card.className = 'yeni-parti-card';
+        
+        card.innerHTML = `
+            ${imgHtml}
+            <div class="yp-header" style="justify-content: space-between;">
+                <div class="yp-tezgah">${p.tezgah}</div>
+                <div class="yp-parti-no">Parti: ${p.partiNo}</div>
+            </div>
+            <div class="yp-body">
+                <div class="yp-info-row" style="grid-column: span 2;">
+                    <span class="yp-info-label">Parça (Operasyon)</span>
+                    <span class="yp-info-value">${p.parcaAdi}</span>
+                </div>
+                <div class="yp-info-row">
+                    <span class="yp-info-label">Üretilecek Miktar</span>
+                    <span class="yp-info-value">${p.uretilecek}</span>
+                </div>
+                <div class="yp-info-row">
+                    <span class="yp-info-label">Tahmini Süre</span>
+                    <span class="yp-info-value">${p.tahminiSure}</span>
+                </div>
+            </div>
+            <div class="yp-actions" style="margin-top: 12px; justify-content: flex-end;">
+                ${resimBtn}
+            </div>
+        `;
+        listContainer.appendChild(card);
+    });
+}
+
+// --- TEZGAH KAPATMA ---
+const tezgahKapatmaVerileri = [
+    { group: "3 Eksenler", items: [
+        { name: "3A", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/26" },
+        { name: "3B", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/36" },
+        { name: "3C", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/30" },
+        { name: "3D", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/31" },
+        { name: "3E", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/35" }
+    ]},
+    { group: "4 Eksenler", items: [
+        { name: "4A", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/21" },
+        { name: "4B", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/11" },
+        { name: "4C", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/12" }
+    ]},
+    { group: "5 Eksenler", items: [
+        { name: "5C", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/10" },
+        { name: "5D", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/14" },
+        { name: "5E", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/29" },
+        { name: "5F", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/39" },
+        { name: "5G", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/40" },
+        { name: "5H", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/41" },
+        { name: "5I", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/42" }
+    ]},
+    { group: "Tornalar", items: [
+        { name: "TORNA1", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/17" },
+        { name: "TORNA2", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/18" },
+        { name: "TORNA3", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/43" },
+        { name: "TORNA4", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/2" }
+    ]},
+    { group: "Diğer", items: [
+        { name: "K1", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/33" },
+        { name: "TESVİYE", url: "https://uys.edelkrone.com/Manufacturing/Workbenches/Details/38" }
+    ]}
+];
+
+function renderTezgahKapatma() {
+    const container = document.getElementById('tezgahKapatmaList');
+    container.innerHTML = '';
+
+    tezgahKapatmaVerileri.forEach(group => {
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'tezgah-group';
+
+        // Grup Başlığı
+        const title = document.createElement('div');
+        title.className = 'tezgah-group-title';
+        title.innerText = group.group;
+        groupDiv.appendChild(title);
+
+        // Kartlar (Grid)
+        const grid = document.createElement('div');
+        grid.className = 'tezgah-grid';
+
+        group.items.forEach(item => {
+            const btn = document.createElement('div');
+            btn.className = 'tezgah-btn';
+            btn.innerHTML = `
+                <div class="tezgah-btn-name">${item.name}</div>
+                <div class="tezgah-btn-icon">☢️</div>
+            `;
+            // Tıklama olayı: Iframe ile açmayı dene, olmazsa yeni sekme
+            btn.onclick = () => openTezgahKapatma(item.url);
+            grid.appendChild(btn);
+        });
+
+        groupDiv.appendChild(grid);
+        container.appendChild(groupDiv);
+    });
+}
+
+// Iframe ile açma fonksiyonu
+function openTezgahKapatma(url) {
+    // Önce yeni bir pencere açıp deneyelim (iframe yerine)
+    // Çünkü iframe X-Frame-Options nedeniyle engellenebilir.
+    // En temizi yeni sekmede açmak.
+    window.open(url, '_blank');
+    
+    // Not: Eğer illa iframe denemek istersen, aşağıdaki gibi bir yapı kurulabilir
+    // ama sitenin güvenlik başlıkları buna izin vermeyebilir.
+    /*
+    const iframeModal = document.createElement('div');
+    iframeModal.className = 'modal-overlay active';
+    iframeModal.style.zIndex = '9999';
+    iframeModal.innerHTML = `
+        <div style="width: 90%; height: 90%; background: white; position: relative;">
+            <button onclick="this.parentNode.parentNode.remove()" style="position: absolute; top: 10px; right: 10px; z-index: 10;">Kapat</button>
+            <iframe src="${url}" style="width: 100%; height: 100%; border: none;"></iframe>
+        </div>
+    `;
+    document.body.appendChild(iframeModal);
+    */
+}
+
+// Navigasyon ve Yenileme fonksiyonlarına ekleme
+// navigateTo içine: else if (screenId === 'tezgahKapatma') renderTezgahKapatma();
+// refreshCurrentPage içine: (Bu sayfa statik olduğu için yenilemeye gerek yok)
+
+// =========================================
+// KAYIT GİRİŞİ SAYFASI MANTIĞI (Birebir Uyarlama)
+// =========================================
+const KayitGirisApp = {
+    benchesMaster: [
+        { name: "3A", benchId: 26, selectable: true },
+        { name: "4A", benchId: 21, selectable: true },
+        { name: "4B", benchId: 11, selectable: true },
+        { name: "4C", benchId: 12, selectable: true },
+        { name: "3B", benchId: 36, selectable: true },
+        { name: "3C", benchId: 30, selectable: true },
+        { name: "3D", benchId: 31, selectable: true },
+        { name: "5D", benchId: 14, selectable: true },
+        { name: "5C", benchId: 10, selectable: true },
+        { name: "TORNA1", benchId: 17, selectable: true },
+        { name: "TORNA2", benchId: 18, selectable: true },
+        { name: "TORNA3", benchId: 43, selectable: true },
+        { name: "TORNA4", benchId: 2, selectable: true },
+        { name: "3E", benchId: 35, selectable: true },
+        { name: "K1", benchId: 33, selectable: true },
+        { name: "5I", benchId: 42, selectable: true },
+        { name: "5H", benchId: 41, selectable: true },
+        { name: "5G", benchId: 40, selectable: true },
+        { name: "5F", benchId: 39, selectable: true },
+        { name: "5E", benchId: 29, selectable: true },
+        { name: "TS1", benchId: 38, selectable: true }
+    ],
+    STORAGE_KEY: "edelkrone_bench_selections",
+    CLICK_STORAGE_KEY: "edelkrone_bench_clicks",
+    SORT_STORAGE_KEY: "edelkrone_bench_sort_order",
+    TIME_LIMIT_STORAGE_KEY: "edelkrone_time_limit",
+    BASE_URL: "https://uys.edelkrone.com/Manufacturing/ProductionRecords/Create?benchId=",
+
+    currentMode: "edit",
+    selectedIds: new Set(),
+    pendingChanges: new Set(),
+    timeLimitMinutes: 60,
+    colorCheckInterval: null,
+    isFetchingDetails: false,
+
+    startColorCheckInterval() {
+        this.stopColorCheckInterval(); // Önce eskiyi temizle
+        if (this.currentMode === "showSelected") {
+            this.colorCheckInterval = setInterval(() => this.updateCardColors(), 10000);
+        }
+    },
+
+    stopColorCheckInterval() {
+        if (this.colorCheckInterval) {
+            clearInterval(this.colorCheckInterval);
+            this.colorCheckInterval = null;
+        }
+    },
+	
+	       updateCardColors() {
+        if (this.currentMode !== "showSelected") return;
+        
+        document.querySelectorAll('#kgDashboard .kg-wide-card').forEach(card => {
+            const benchName = card.getAttribute('data-name');
+            const bench = this.benchesMaster.find(b => b.name === benchName);
+            if (!bench) return;
+            
+            // Sadece başlık elementini seç
+            const titleEl = card.querySelector('.kg-wide-title');
+            if (!titleEl) return;
+
+            const colorStyle = this.getCardBorderColorClass(bench);
+            
+            // Önce eski renkleri temizle
+            titleEl.style.color = '';
+            
+            if (colorStyle.includes('var(--danger)')) {
+                titleEl.style.color = 'var(--danger)'; // Kırmızı
+            } else if (colorStyle.includes('#4ADE80')) {
+                titleEl.style.color = '#4ADE80'; // Yeşil
+            } else {
+                titleEl.style.color = 'var(--text)'; // Varsayılan (siyah/beyaz)
+            }
+        });
+    },
+
+    init() {
+        this.loadFromStorage();
+        this.updateStats();
+        this.render();
+        
+        // Eğer sayfa seçim modunda açılıyorsa arka planda veriyi çek (cache varsa hızlı gelir)
+        if (this.currentMode === "showSelected" || this.currentMode === "showAllWithSplit") {
+            this.fetchBenchDetails(false);
+        }
+    },
+
+    isMobile() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    },
+
+    getSortOrder() {
+        const saved = localStorage.getItem(this.SORT_STORAGE_KEY);
+        return saved ? JSON.parse(saved) : null;
+    },
+
+    saveSortOrder(orderArray) {
+        localStorage.setItem(this.SORT_STORAGE_KEY, JSON.stringify(orderArray));
+    },
+
+    getTimeLimit() {
+        const saved = localStorage.getItem(this.TIME_LIMIT_STORAGE_KEY);
+        if (saved) {
+            const val = parseInt(saved);
+            if (!isNaN(val) && val > 0) return val;
+        }
+        return 60;
+    },
+
+    saveTimeLimit(minutes) {
+        localStorage.setItem(this.TIME_LIMIT_STORAGE_KEY, minutes.toString());
+    },
+
+    sortBenchesByOrder(benches) {
+        const sortOrder = this.getSortOrder();
+        if (!sortOrder || !Array.isArray(sortOrder)) return benches;
+        const benchMap = new Map();
+        benches.forEach(b => benchMap.set(b.name, b));
+        const sorted = [];
+        sortOrder.forEach(name => {
+            if (benchMap.has(name)) {
+                sorted.push(benchMap.get(name));
+                benchMap.delete(name);
+            }
+        });
+        benchMap.forEach(b => sorted.push(b));
+        return sorted;
+    },
+
+    saveClickTime(benchId) {
+        if (!benchId) return;
+        const clicks = JSON.parse(localStorage.getItem(this.CLICK_STORAGE_KEY) || "{}");
+        clicks[benchId] = new Date().toISOString();
+        localStorage.setItem(this.CLICK_STORAGE_KEY, JSON.stringify(clicks));
+    },
+
+    getFormattedClickTime(benchId) {
+        if (!benchId) return "";
+        const clicks = JSON.parse(localStorage.getItem(this.CLICK_STORAGE_KEY) || "{}");
+        const isoString = clicks[benchId];
+        if (!isoString) return "";
+        const date = new Date(isoString);
+        const day = date.getDate();
+        const month = date.toLocaleString('tr-TR', { month: 'short' }).replace('.', '');
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        return `${day} ${month} ${hours}:${minutes}`;
+    },
+
+        parseTurkishDate(dateStr) {
+        if (!dateStr || dateStr === "-") return null;
+        const months = { "Ocak": 0, "Şubat": 1, "Mart": 2, "Nisan": 3, "Mayıs": 4, "Haziran": 5, "Temmuz": 6, "Ağustos": 7, "Eylül": 8, "Ekim": 9, "Kasım": 10, "Aralık": 11 };
+        
+        // Örnek format: "14 Kasım 2026 23:55"
+        const parts = dateStr.trim().split(/\s+/); // Birden fazla boşluğu tek boşluk yapar
+        if (parts.length < 4) return null;
+        
+        const day = parseInt(parts[0]);
+        const month = months[parts[1]];
+        const year = parseInt(parts[2]);
+        
+        // Saat kısmını ayır (örn: "23:55" veya "09:30")
+        const timeParts = parts[3].split(':');
+        const hour = parseInt(timeParts[0]);
+        const min = parseInt(timeParts[1] || 0);
+
+        if (isNaN(day) || month === undefined || isNaN(year) || isNaN(hour) || isNaN(min)) return null;
+
+        return new Date(year, month, day, hour, min);
+    },
+
+    getElapsedTimeText(dateObj) {
+        if (!dateObj) return "-";
+        const now = new Date();
+        const diffMs = now - dateObj;
+        if (diffMs < 0) return "-"; 
+        const diffMins = Math.floor(diffMs / 60000);
+        const hours = Math.floor(diffMins / 60);
+        const mins = diffMins % 60;
+        if (hours > 0) return `${hours} saat ${mins} dk önce`;
+        return `${mins} dk önce`;
+    },
+
+        getCardBorderColorClass(bench) {
+        // Eğer tarih yoksa veya hatalıysa varsayılan renk dön
+        if (!bench.lastRecordDateObj) return ""; 
+        
+        const now = new Date();
+        
+        // Aradaki farkı milisaniye cinsinden bul
+        const diffMs = now - bench.lastRecordDateObj;
+        
+        // Milisaniyeyi dakikaya çevir
+        const diffMins = diffMs / (1000 * 60);
+        
+        // Eğer geçen süre, ayarlanan süreden (timeLimitMinutes) büyükse kırmızı, değilse yeşil
+        if (diffMins > this.timeLimitMinutes) {
+            return "var(--danger)"; // Kırmızı
+        } else {
+            return "#4ADE80"; // Yeşil
+        }
+    },
+
+    openLink(url, benchId) {
+        if (benchId) this.saveClickTime(benchId);
+        if (this.isMobile()) {
+            window.open(url, '_blank');
+        } else {
+            const width = 1000, height = 800;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'tezgahDetay', `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+        }
+    },
+
+                async fetchBenchDetails(forceRefresh = false) {
+        if (this.isFetchingDetails) return;
+        
+        const cacheKey = 'selectBenchDetails';
+        if (!forceRefresh) {
+            const cached = getCache(cacheKey);
+            if (cached) {
+                this.mergeDetailsToMaster(cached);
+                return;
+            }
+        }
+
+        this.isFetchingDetails = true;
+        showInfoModal("Bilgi", "Seçilen tezgahların detayları çekiliyor, lütfen bekleyin...");
+
+        try {
+            // 1. ANA LİSTEYİ ÇEK
+            const response = await fetchWithAuth(`${API_URL}?path=Manufacturing/ProductionRecords/SelectBench`);
+            if (!response.ok) throw new Error("Sunucu hatası");
+            const htmlText = await response.text();
+            
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlText, "text/html");
+            const cards = doc.querySelectorAll('.ui.card');
+            
+            let detailsData = {};
+            let pendingChecks = []; 
+
+            cards.forEach(card => {
+                const titleEl = card.querySelector('h3.center.aligned.header');
+                if (!titleEl) return;
+                const benchName = titleEl.innerText.trim();
+
+                let pendingCount = "0";
+                const text = card.innerText;
+                const match = text.match(/Bekleyen Kayıt Sayısı\s*:\s*(\d+)/);
+                if (match) pendingCount = match[1];
+
+                let operation = "-", lastRecordStr = "-";
+                const dts = card.querySelectorAll('dt');
+                dts.forEach(dt => {
+                    const dtText = dt.innerText.trim();
+                    const dd = dt.nextElementSibling;
+                    if (!dd) return;
+                    const val = dd.innerText.trim();
+                    if (dtText === 'Operasyon') operation = val;
+                    if (dtText === 'Son Kayıt Tarihi') lastRecordStr = val;
+                });
+
+                const imgEl = card.querySelector('img.ui.centered.image') || card.querySelector('.ui.image img');
+                const image = imgEl ? imgEl.getAttribute('src').replace(/\\/g, '/') : "";
+
+                detailsData[benchName] = { pendingCount, image, operation, lastRecordStr };
+                
+                const benchObj = this.benchesMaster.find(b => b.name === benchName);
+                if (benchObj && this.selectedIds.has(benchObj.benchId) && parseInt(pendingCount) > 0) {
+                    pendingChecks.push({ name: benchName, benchId: benchObj.benchId });
+                }
+            });
+
+            // 2. SADECE SEÇİLEN VE BEKLEYENİ OLANLAR İÇİN KAYIT FORMU SAYFASINA GİT
+            if (pendingChecks.length > 0) {
+                const detailPromises = pendingChecks.map(async (item) => {
+                    try {
+                        // YENİ: Doğru sayfaya gidiyoruz (Create sayfası)
+                        const detailRes = await fetchWithAuth(`${API_URL}?path=Manufacturing/ProductionRecords/Create?benchId=${item.benchId}`);
+                        const detailHtml = await detailRes.text();
+                        const detailDoc = parser.parseFromString(detailHtml, "text/html");
+                        
+                        let operatorName = "";
+                        const workerNameInput = detailDoc.querySelector('#WorkerName');
+                        if (workerNameInput) {
+                            operatorName = workerNameInput.value; 
+                        }
+
+                        if (detailsData[item.name]) {
+                            detailsData[item.name].operatorName = operatorName;
+                        }
+                    } catch (e) { console.log("Detay çekilemedi:", item.name); }
+                });
+
+                await Promise.all(detailPromises);
+            }
+
+            setCache(cacheKey, detailsData);
+            this.mergeDetailsToMaster(detailsData);
+            closeModal('infoModal');
+
+        } catch (err) {
+            closeModal('infoModal');
+            showInfoModal("Hata", "Detaylar çekilemedi: " + err.message);
+        } finally {
+            this.isFetchingDetails = false;
+        }
+    },
+
+        mergeDetailsToMaster(detailsData) {
+        this.benchesMaster.forEach(bench => {
+            const detail = detailsData[bench.name];
+            if (detail) {
+                bench.pendingCount = detail.pendingCount;
+                bench.image = detail.image;
+                bench.operation = detail.operation;
+                bench.lastRecordStr = detail.lastRecordStr;
+                bench.lastRecordDateObj = this.parseTurkishDate(detail.lastRecordStr);
+                bench.operatorName = detail.operatorName || ""; // YENİ EKLENDİ
+            }
+        });
+        this.render();
+    },
+
+    loadFromStorage() {
+        const saved = localStorage.getItem(this.STORAGE_KEY);
+        this.timeLimitMinutes = this.getTimeLimit();
+        if (saved) {
+            try {
+                const data = JSON.parse(saved);
+                this.selectedIds.clear();
+                if (data.selectedIds) data.selectedIds.forEach(id => this.selectedIds.add(id));
+                if (data.currentMode && data.currentMode !== "showAllWithSplit") {
+                    this.currentMode = data.currentMode;
+                } else {
+                    this.currentMode = this.selectedIds.size > 0 ? "showSelected" : "edit";
+                }
+            } catch (e) { console.log("Storage okuma hatası:", e); }
+        }
+    },
+
+    saveToStorage() {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
+            selectedIds: [...this.selectedIds],
+            currentMode: this.currentMode
+        }));
+    },
+
+    isSelected(bench, usePending = false) {
+        if (!bench.selectable) return false;
+        if (usePending && this.currentMode === "showAllWithSplit") return this.pendingChanges.has(bench.benchId);
+        return this.selectedIds.has(bench.benchId);
+    },
+
+    toggleSelect(bench, usePending = false) {
+        if (!bench.selectable) {
+            showInfoModal("Uyarı", `${bench.name} için tezgah ID'si henüz girilmemiş.`);
+            return false;
+        }
+        if (usePending && this.currentMode === "showAllWithSplit") {
+            if (this.pendingChanges.has(bench.benchId)) this.pendingChanges.delete(bench.benchId);
+            else this.pendingChanges.add(bench.benchId);
+        } else {
+            if (this.selectedIds.has(bench.benchId)) this.selectedIds.delete(bench.benchId);
+            else this.selectedIds.add(bench.benchId);
+            this.saveToStorage();
+        }
+        this.updateStats();
+        this.render();
+        return true;
+    },
+
+    selectAll() {
+        this.benchesMaster.forEach(b => { if (b.selectable) this.selectedIds.add(b.benchId); });
+        this.saveToStorage(); this.updateStats(); this.render();
+    },
+
+    clearAll() {
+        this.selectedIds.clear();
+        this.saveToStorage(); this.updateStats(); this.render();
+    },
+
+    updateStats() {
+        const totalBenches = this.benchesMaster.length;
+        let selectedCount = 0, unselectedCount = 0;
+
+        if (this.currentMode === "showAllWithSplit") {
+            this.benchesMaster.forEach(b => {
+                if (b.selectable) {
+                    if (this.pendingChanges.has(b.benchId)) selectedCount++;
+                    else unselectedCount++;
+                } else unselectedCount++;
+            });
+        } else {
+            this.benchesMaster.forEach(b => {
+                if (b.selectable) {
+                    if (this.selectedIds.has(b.benchId)) selectedCount++;
+                    else unselectedCount++;
+                } else unselectedCount++;
+            });
+        }
+
+        document.getElementById('kgTotalCount').innerText = totalBenches;
+        document.getElementById('kgSelectedCount').innerText = selectedCount;
+        document.getElementById('kgUnselectedCount').innerText = unselectedCount;
+    },
+
+    // ... (showSortModal, saveSortFromModal, showTimeSettingModal, saveTimeFromModal AYNI KALACAK)
+    showSortModal(benches) {
+        const modalContent = `
+            <div class="modal-header"><div class="modal-title">Sıralamayı Düzenle</div><button class="modal-close" onclick="closeModal('kgSortModal')">✖</button></div>
+            <div id="kgSortList" style="max-height: 50vh; overflow-y: auto; margin-top: 12px;"></div>
+            <div class="modal-buttons-row">
+                <button class="btn-modal btn-modal-cancel" onclick="closeModal('kgSortModal')">İptal</button>
+                <button class="btn-modal btn-modal-save" onclick="KayitGirisApp.saveSortFromModal()">Kaydet</button>
+            </div>
+        `;
+        let modalDiv = document.getElementById('kgSortModal');
+        if (!modalDiv) {
+            modalDiv = document.createElement('div'); modalDiv.id = 'kgSortModal'; modalDiv.className = 'modal-overlay'; modalDiv.innerHTML = `<div class="modal-content"></div>`; document.body.appendChild(modalDiv);
+        }
+        modalDiv.querySelector('.modal-content').innerHTML = modalContent; openModal('kgSortModal');
+        let currentOrder = benches.map(b => b.name);
+        const renderSortList = () => {
+            const listContainer = document.getElementById('kgSortList'); listContainer.innerHTML = '';
+            currentOrder.forEach((name, index) => {
+                const div = document.createElement('div'); div.className = 'sort-item';
+                div.innerHTML = `<span class="sort-item-name">${name}</span><div class="sort-btn-group"><button class="sort-btn sort-up" ${index === 0 ? 'disabled' : ''}>▲</button><button class="sort-btn sort-down" ${index === currentOrder.length - 1 ? 'disabled' : ''}>▼</button></div>`;
+                div.querySelector('.sort-up').onclick = () => { if (index > 0) { [currentOrder[index], currentOrder[index - 1]] = [currentOrder[index - 1], currentOrder[index]]; renderSortList(); } };
+                div.querySelector('.sort-down').onclick = () => { if (index < currentOrder.length - 1) { [currentOrder[index], currentOrder[index + 1]] = [currentOrder[index + 1], currentOrder[index]]; renderSortList(); } };
+                listContainer.appendChild(div);
+            });
+        };
+        renderSortList(); this._tempSortOrder = currentOrder;
+    },
+
+    saveSortFromModal() {
+        this.saveSortOrder(this._tempSortOrder); closeModal('kgSortModal'); this.render();
+    },
+
+    showTimeSettingModal() {
+        const modalContent = `
+            <div class="modal-header"><div class="modal-title">⏱️ Süre Ayarı</div><button class="modal-close" onclick="closeModal('kgTimeModal')">✖</button></div>
+            <p style="text-align:center; margin-top: 12px;">Zaman aşımı süresi (dakika):</p>
+            <input type="number" id="kgTimeInput" class="time-input" value="${this.timeLimitMinutes}" min="1" max="1440" style="display:block; margin: 0 auto;">
+            <div class="modal-buttons-row">
+                <button class="btn-modal btn-modal-cancel" onclick="closeModal('kgTimeModal')">İptal</button>
+                <button class="btn-modal btn-modal-save" onclick="KayitGirisApp.saveTimeFromModal()">Kaydet</button>
+            </div>
+        `;
+        let modalDiv = document.getElementById('kgTimeModal');
+        if (!modalDiv) {
+            modalDiv = document.createElement('div'); modalDiv.id = 'kgTimeModal'; modalDiv.className = 'modal-overlay'; modalDiv.innerHTML = `<div class="modal-content"></div>`; document.body.appendChild(modalDiv);
+        }
+        modalDiv.querySelector('.modal-content').innerHTML = modalContent; openModal('kgTimeModal');
+    },
+
+    saveTimeFromModal() {
+        const val = parseInt(document.getElementById('kgTimeInput').value);
+        if (!isNaN(val) && val > 0) {
+            this.timeLimitMinutes = val; this.saveTimeLimit(val); this.render(); closeModal('kgTimeModal');
+        }
+    },
+
+                renderWideCard(bench) {
+        const colorStyle = this.getCardBorderColorClass(bench);
+        const elapsed = this.getElapsedTimeText(bench.lastRecordDateObj);
+        let titleColor = 'var(--text)';
+        if (colorStyle.includes('var(--danger)')) titleColor = 'var(--danger)';
+        else if (colorStyle.includes('#4ADE80')) titleColor = '#4ADE80';
+
+        // İsim varsa yanına ekle, yoksa boş bırak
+        const opText = bench.operatorName ? ` | Sıradaki: ${bench.operatorName}` : "";
+
+        return `
+            <div class="kg-wide-card" data-name="${bench.name}" data-id="${bench.benchId}">
+                ${bench.image ? `<img src="${bench.image}" class="kg-wide-img">` : `<div class="kg-wide-img"></div>`}
+                <div class="kg-wide-content">
+                    <div class="kg-wide-top">
+                        <div class="kg-wide-title" style="color: ${titleColor}; font-weight: bold;">${bench.name}</div>
+                        <div class="kg-wide-pending">Bekleyen: ${bench.pendingCount || '0'}${opText}</div>
+                    </div>
+                    <div class="kg-wide-op">${bench.operation || '-'}</div>
+                    <div class="kg-wide-bottom">
+                        <span>${bench.lastRecordStr || '-'}</span>
+                        <span class="kg-wide-time">${elapsed}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
+    renderSimpleCard(bench, isSelectedFlag, showTick = true, showTime = false) {
+        const selectedClass = isSelectedFlag ? "selected" : "";
+        const tickHtml = (isSelectedFlag && showTick) ? `<div class="kg-check-mark">✓</div>` : "";
+        const timeHtml = (showTime && bench.benchId) ? `<div class="kg-click-time">${this.getFormattedClickTime(bench.benchId)}</div>` : "";
+        return `
+            <div class="kg-card ${selectedClass}" data-name="${bench.name}" data-id="${bench.benchId}" data-selectable="${bench.selectable}">
+                ${tickHtml}<div class="kg-icon">🔧</div><div class="kg-name">${bench.name}</div>${timeHtml}
+            </div>`;
+    },
+
+    setupDragAndDrop() {
+        if (this.currentMode !== "showSelected") return;
+        const grid = document.querySelector('#kgDashboard .kg-wide-card');
+        if (!grid) return;
+        let draggedItem = null;
+
+        document.querySelectorAll('#kgDashboard .kg-wide-card').forEach(card => {
+            card.setAttribute('draggable', 'true');
+            card.addEventListener('dragstart', function(e) {
+                draggedItem = this; this.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', this.getAttribute('data-name'));
+            });
+            card.addEventListener('dragend', function() {
+                this.classList.remove('dragging'); document.querySelectorAll('.kg-wide-card').forEach(c => c.classList.remove('drag-over')); draggedItem = null;
+            });
+            card.addEventListener('dragover', function(e) {
+                e.preventDefault(); if (this !== draggedItem) this.classList.add('drag-over');
+            });
+            card.addEventListener('dragleave', function() { this.classList.remove('drag-over'); });
+            card.addEventListener('drop', function(e) {
+                e.preventDefault(); this.classList.remove('drag-over');
+                if (draggedItem && draggedItem !== this) {
+                    const cards = [...document.querySelectorAll('.kg-wide-card')];
+                    const draggedName = draggedItem.getAttribute('data-name');
+                    const targetName = this.getAttribute('data-name');
+                    const sortOrder = KayitGirisApp.getSortOrder() || cards.map(c => c.getAttribute('data-name'));
+                    const draggedIndex = sortOrder.indexOf(draggedName);
+                    const targetIndex = sortOrder.indexOf(targetName);
+                    if (draggedIndex !== -1 && targetIndex !== -1) {
+                        sortOrder.splice(draggedIndex, 1); sortOrder.splice(targetIndex, 0, draggedName);
+                        KayitGirisApp.saveSortOrder(sortOrder); KayitGirisApp.render();
+                    }
+                }
+            });
+        });
+    },
+
+    attachCardEvents(mode) {
+        document.querySelectorAll('#kgDashboard [data-name]').forEach(card => {
+            const benchName = card.getAttribute('data-name');
+            const bench = this.benchesMaster.find(b => b.name === benchName);
+            if (!bench) return;
+
+            card.onclick = (e) => {
+                e.stopPropagation();
+                if (mode === "edit") {
+                    this.toggleSelect(bench, false);
+                } else if (mode === "showAllWithSplit") {
+                    if (!bench.selectable) { showInfoModal("Uyarı", `${bench.name} için ID girilmemiş.`); return; }
+                    if (this.pendingChanges.has(bench.benchId)) { this.pendingChanges.delete(bench.benchId); card.classList.remove('selected'); const tick = card.querySelector('.kg-check-mark'); if (tick) tick.remove(); }
+                    else { this.pendingChanges.add(bench.benchId); card.classList.add('selected'); if (!card.querySelector('.kg-check-mark')) { const tickSpan = document.createElement('div'); tickSpan.className = 'kg-check-mark'; tickSpan.innerText = '✓'; card.insertBefore(tickSpan, card.firstChild); } }
+                    this.updateStats();
+                } else if (mode === "showSelected") {
+                    if (!bench.selectable) { showInfoModal("Uyarı", `${bench.name} için ID bulunamadı.`); return; }
+                    this.openLink(this.BASE_URL + bench.benchId, bench.benchId);
+                }
+            };
+        });
+    },
+
+    render() {
+        const dashboard = document.getElementById('kgDashboard');
+        const buttonGroup = document.getElementById('kgButtonGroup');
+        if (!dashboard) return;
+
+        this.stopColorCheckInterval();
+        buttonGroup.innerHTML = '';
+
+        if (this.currentMode === "edit") {
+            buttonGroup.innerHTML = `
+                <button class="btn-kg" id="btnKgSelectAll">Tümünü Seç</button>
+                <button class="btn-kg" id="btnKgClearAll">Tümü İptal</button>
+                <button class="btn-kg" id="btnKgConfirm">Tamam</button>
+                <button class="btn-kg btn-kg-danger" id="btnKgResetAll">Sıfırla</button>
+            `;
+            document.getElementById('btnKgSelectAll').onclick = () => this.selectAll();
+            document.getElementById('btnKgClearAll').onclick = () => this.clearAll();
+            document.getElementById('btnKgConfirm').onclick = () => {
+                if (this.selectedIds.size === 0) { showInfoModal("Uyarı", "Hiçbir tezgah seçili değil."); return; }
+                this.currentMode = "showSelected"; this.saveToStorage(); this.updateStats(); 
+                
+                // TAMAM'A BASILINCA VERİYİ ÇEK (Zorla)
+                this.fetchBenchDetails(true); 
+                this.render();
+            };
+            document.getElementById('btnKgResetAll').onclick = () => {
+                showConfirmModal("Tüm tezgah seçimleri silinecek. Onaylıyor musunuz?", () => {
+                    this.clearAll(); this.currentMode = "edit"; this.saveToStorage(); this.updateStats(); this.render();
+                });
+            };
+
+            const allBenches = [...this.benchesMaster];
+            dashboard.innerHTML = `<div class="kg-grid">${allBenches.map(b => this.renderSimpleCard(b, this.isSelected(b, false), true, false)).join('')}</div>`;
+            this.attachCardEvents("edit");
+
+        } else if (this.currentMode === "showSelected") {
+            buttonGroup.innerHTML = `
+                <button class="btn-kg" id="btnKgSortOrder">📋 Sırala</button>
+                <button class="btn-kg" id="btnKgTimeSetting">⏱️ Süre Ayarı</button>
+                <button class="btn-kg" id="btnKgShowAllBenches">Tüm Tezgahları Göster</button>
+                <button class="btn-kg btn-kg-danger" id="btnKgResetAllMode2">Sıfırla</button>
+            `;
+            document.getElementById('btnKgSortOrder').onclick = () => {
+                const selectedBenches = this.benchesMaster.filter(b => this.isSelected(b, false));
+                this.showSortModal(this.sortBenchesByOrder(selectedBenches));
+            };
+            document.getElementById('btnKgTimeSetting').onclick = () => this.showTimeSettingModal();
+            document.getElementById('btnKgShowAllBenches').onclick = () => {
+                this.pendingChanges.clear(); this.selectedIds.forEach(id => this.pendingChanges.add(id)); this.currentMode = "showAllWithSplit"; this.updateStats(); this.render();
+            };
+            document.getElementById('btnKgResetAllMode2').onclick = () => {
+                showConfirmModal("Tüm seçimler silinecek. Onaylıyor musunuz?", () => {
+                    this.clearAll(); this.currentMode = "edit"; this.saveToStorage(); this.updateStats(); this.render();
+                });
+            };
+
+            const selectedBenches = this.benchesMaster.filter(b => this.isSelected(b, false));
+            const sortedBenches = this.sortBenchesByOrder(selectedBenches);
+            
+            if (sortedBenches.length === 0) {
+                dashboard.innerHTML = `<div style="text-align:center; color:var(--primary); padding: 40px;">Henüz seçili tezgah yok.</div>`;
+            } else {
+                dashboard.innerHTML = sortedBenches.map(b => this.renderWideCard(b)).join('');
+                this.attachCardEvents("showSelected");
+                this.setupDragAndDrop(); 
+                this.startColorCheckInterval();
+            }
+
+        } else if (this.currentMode === "showAllWithSplit") {
+            buttonGroup.innerHTML = `
+                <button class="btn-kg" id="btnKgSaveMode3">Kaydet</button>
+                <button class="btn-kg btn-kg-secondary" id="btnKgCancelMode3">İptal</button>
+                <button class="btn-kg btn-kg-danger" id="btnKgResetAllMode3">Sıfırla</button>
+            `;
+            document.getElementById('btnKgSaveMode3').onclick = () => {
+                this.selectedIds.clear(); this.pendingChanges.forEach(id => this.selectedIds.add(id)); this.saveToStorage(); this.currentMode = "showSelected"; this.updateStats(); this.render();
+            };
+            document.getElementById('btnKgCancelMode3').onclick = () => { this.currentMode = "showSelected"; this.updateStats(); this.render(); };
+            document.getElementById('btnKgResetAllMode3').onclick = () => {
+                showConfirmModal("Tüm seçimler silinecek. Onaylıyor musunuz?", () => {
+                    this.clearAll(); this.currentMode = "edit"; this.saveToStorage(); this.updateStats(); this.render();
+                });
+            };
+
+            const selectedBenches = this.benchesMaster.filter(b => this.isSelected(b, true));
+            const unselectedBenches = this.benchesMaster.filter(b => !this.isSelected(b, true) && b.selectable);
+            const ts1Bench = this.benchesMaster.find(b => b.name === "TS1");
+
+            let html = `<div class="kg-grid">${selectedBenches.map(b => this.renderSimpleCard(b, true, true, false)).join('')}</div>`;
+            if (unselectedBenches.length > 0 || (ts1Bench && !ts1Bench.selectable)) {
+                html += `<div class="kg-divider"></div><div class="kg-section-title">📌 Seçilmemiş Tezgahlar</div>`;
+                const unselectedList = [...unselectedBenches];
+                if (ts1Bench && !ts1Bench.selectable) unselectedList.push(ts1Bench);
+                html += `<div class="kg-grid">${unselectedList.map(b => this.renderSimpleCard(b, false, false, false)).join('')}</div>`;
+            }
+            dashboard.innerHTML = html;
+            this.attachCardEvents("showAllWithSplit");
+        }
+        this.updateStats();
+    }
+};
+
+// --- ATAMALAR ALT MENÜSÜNÜ AÇ/KAPAT ---
+function toggleAtamalarMenu() {
+    const subMenu = document.getElementById('atamalarSubMenu');
+    const icon = document.getElementById('atamalarIcon');
+    
+    if (subMenu.style.display === 'none' || subMenu.style.display === '') {
+        subMenu.style.display = 'flex'; // Aç
+        icon.style.transform = 'rotate(180deg)'; // Oku yukarı çevir
+    } else {
+        subMenu.style.display = 'none'; // Kapat
+        icon.style.transform = 'rotate(0deg)'; // Oku aşağı çevir
+    }
+}
+
+// --- ANDROID DONANIM GERİ TUŞU YÖNETİMİ ---
+window.addEventListener('popstate', function(event) {
+    // Eğer bir modal açıksa, önce onu kapat
+    const acikModal = document.querySelector('.modal-overlay.active');
+    if (acikModal) {
+        acikModal.classList.remove('active');
+        history.pushState(null, null, location.href); // Modal kapandığı için geçmişi geri al
+        return;
+    }
+
+    // Eğer ana ekranda değilsek, ana ekrana (home) dön
+    const homeScreen = document.getElementById('homeScreen');
+    if (homeScreen.classList.contains('hidden')) {
+        navigateTo('home');
+        history.pushState(null, null, location.href); // Ana ekrana dönüldüğü için geçmişi geri al
+    } else {
+        // Ana ekrandaysak çıkış onayı sor
+        showConfirmModal("Uygulamadan çıkmak istediğinize emin misiniz?", () => {
+            // Kullanıcı "Evet" derse pencereyi kapat (PWA'dan çık)
+            window.close(); 
+            // Eğer window.close() çalışmazsa (tarayıcı izin vermezse) boş sayfaya yönlendir
+            location.href = 'about:blank'; 
+        });
+        // Onay modali açıldığı için geçmişi tekrar ekle (geri tuşuna basıldığında tekrar tetiklenmesin diye)
+        history.pushState(null, null, location.href);
+    }
+});
+
+// Uygulama ilk açıldığında geçmişe bir kayıt ekle (geri tuşunu yakalayabilmek için)
+history.pushState(null, null, location.href);
