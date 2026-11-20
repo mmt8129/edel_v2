@@ -555,9 +555,9 @@ body.dark-mode .kg-wide-card { background-color: var(--dark-surface); }
 
 .menu-btn { font-size: 25px; }
 .menu-btn .subtitle { font-size: 15px; }
-.party-info, .party-bottom, .filter-btn { font-size: 18px; }
-.rapor-table { font-size: 16px; }
-.rapor-table th { font-size: 16px; }
+.party-info, .party-bottom, .filter-btn { font-size: 16px; }
+.rapor-table, .rapor-table th, .rapor-table td { font-size: 14px; }
+.rapor-table td { padding: 6px 4px; }
 .op-table th, .ayarci-table th, .depo-raf { font-size: 16px; }
 .op-table td, .ayarci-table td, .depo-name, .yp-info-row { font-size: 18px; }
 .yp-info-label, .detail-label, .detail-card-title, .depo-status { font-size: 15px; }
