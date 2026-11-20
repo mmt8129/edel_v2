@@ -553,16 +553,16 @@ body.dark-mode .kg-wide-card { background-color: var(--dark-surface); }
 .t-green { color: #4ADE80; }
 .t-red { color: #EF4444; }
 
-.menu-btn { font-size: 18px; }
-.menu-btn .subtitle { font-size: 14px; }
-.party-info, .party-bottom, .filter-btn { font-size: 14px; }
-.rapor-table { font-size: 13px; }
-.rapor-table th { font-size: 14px; }
-.op-table th, .ayarci-table th, .depo-raf { font-size: 14px; }
-.op-table td, .ayarci-table td, .depo-name, .yp-info-row { font-size: 16px; }
-.yp-info-label, .detail-label, .detail-card-title, .depo-status { font-size: 13px; }
+.menu-btn { font-size: 25px; }
+.menu-btn .subtitle { font-size: 15px; }
+.party-info, .party-bottom, .filter-btn { font-size: 18px; }
+.rapor-table { font-size: 16px; }
+.rapor-table th { font-size: 16px; }
+.op-table th, .ayarci-table th, .depo-raf { font-size: 16px; }
+.op-table td, .ayarci-table td, .depo-name, .yp-info-row { font-size: 18px; }
+.yp-info-label, .detail-label, .detail-card-title, .depo-status { font-size: 15px; }
 .kayit-stats { font-size: 14px; }
-.kayit-stats .count, .kayit-buttons .btn-kg { font-size: 15px; }
-.kg-wide-pending, .kg-wide-bottom { font-size: 14px; }
-.kg-wide-op { font-size: 16px; }
-.tezgah-btn-sub { font-size: 14px !important; }
+.kayit-stats .count, .kayit-buttons .btn-kg { font-size: 17px; }
+.kg-wide-pending, .kg-wide-bottom { font-size: 16px; }
+.kg-wide-op { font-size: 18px; }
+.tezgah-btn-sub { font-size: 16px !important; }
