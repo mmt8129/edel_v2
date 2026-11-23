@@ -3545,7 +3545,7 @@ window.addEventListener('popstate', function(event) {
     } else {
         showConfirmModal("Uygulamadan çıkmak istediğinize emin misiniz?", () => {
             window.close(); 
-            location.href = 'about:blank'; 
+            // location.href = 'about:blank'; 
         });
         history.pushState(null, null, location.href);
     }
