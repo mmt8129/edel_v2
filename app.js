@@ -302,6 +302,7 @@ function openBottomTab(tabName) {
     overlay.classList.remove('hidden');
     overlay.scrollTop = 0;
     activeBottomTab = tabName;
+    sessionStorage.setItem('sonAltSekme', tabName);
 
     syncBottomTabBarUI();
     updateTopBarControls();
@@ -330,6 +331,7 @@ function closeBottomTab(fromPopstate = false) {
     overlay.classList.add('hidden');
     activeBottomTab = null;
     bottomTabSourceEl = null;
+    sessionStorage.removeItem('sonAltSekme');
 
     syncBottomTabBarUI();
     updateTopBarControls();
@@ -359,10 +361,14 @@ function navigateTo(screenId) {
 
     if (screenId === 'home') {
         document.getElementById('homeScreen').classList.remove('hidden');
+        sessionStorage.setItem('sonEkran', 'home');
     } else {
         const targetScreen = document.getElementById(screenId + 'Screen');
-        if (targetScreen) targetScreen.classList.remove('hidden');
-        
+        if (targetScreen) {
+            targetScreen.classList.remove('hidden');
+            sessionStorage.setItem('sonEkran', screenId);
+        }
+
         if (screenId === 'aktifPartiler') fetchParties();
         else if (screenId === 'operatorAtamalari') fetchOperators();
         else if (screenId === 'ayarciAtamalari') fetchAyarcilar();
@@ -498,11 +504,11 @@ async function refreshCurrentPage() {
 let currentSort = 0;
 let partyData = [];
 
-async function fetchParties() {
+async function fetchParties(forceRefresh = false) {
     const listContainer = document.getElementById('partyList');
     const countText = document.getElementById('activeBenchCount');
     
-    const cachedData = getCache('aktifPartiler');
+    const cachedData = !forceRefresh ? getCache('aktifPartiler') : null;
     if (cachedData) {
         partyData = cachedData;
         renderParties();
@@ -1066,11 +1072,11 @@ function renderVakaListesi(vakaListesi) {
     content.innerHTML = vakaHtml;
 }
 
-async function fetchOperators() {
+async function fetchOperators(forceRefresh = false) {
     const listContainer = document.getElementById('operatorList');
     const countText = document.getElementById('operatorCount');
     
-    const cachedData = getCache('operatorler');
+    const cachedData = !forceRefresh ? getCache('operatorler') : null;
     if (cachedData) {
         renderOperators(cachedData);
         return;
@@ -1228,10 +1234,10 @@ function renderOperators(operators) {
 // --- DEPO (PARÇA ARAMA) ---
 let tumDepoVerileri = [];
 
-async function fetchDepo() {
+async function fetchDepo(forceRefresh = false) {
     const listContainer = document.getElementById('depoResults');
     
-    const cachedData = getCache('depo');
+    const cachedData = !forceRefresh ? getCache('depo') : null;
     if (cachedData) {
         tumDepoVerileri = cachedData;
         renderDepo(tumDepoVerileri);
@@ -1772,7 +1778,6 @@ async function sendAIMessage() {
     }
 }
 
-// --- SAYFA YÜKLENDİĞİNDE (HER ZAMAN ANA EKRAN) ---
 window.addEventListener('DOMContentLoaded', () => {
     localStorage.removeItem('aktifSayfa');
     updateLoggedInUserUI();
@@ -1782,16 +1787,22 @@ window.addEventListener('DOMContentLoaded', () => {
         openModal('loginModal');
     } else {
         closeModal('loginModal');
-        navigateTo('home');
+        const sonEkran = sessionStorage.getItem('sonEkran') || 'home';
+        const sonAltSekme = sessionStorage.getItem('sonAltSekme');
+
+        navigateTo(sonEkran);
+        if (sonAltSekme && BOTTOM_TAB_SCREENS[sonAltSekme]) {
+            openBottomTab(sonAltSekme);
+        }
     }
 });
 
 // --- AYARCI ATAMALARI ---
-async function fetchAyarcilar() {
+async function fetchAyarcilar(forceRefresh = false) {
     const listContainer = document.getElementById('ayarciList');
     const countText = document.getElementById('ayarciCount');
     
-    const cachedData = getCache('ayarcilar');
+    const cachedData = !forceRefresh ? getCache('ayarcilar') : null;
     if (cachedData) {
         renderAyarcilar(cachedData);
         return;
@@ -2206,11 +2217,11 @@ setupKeypad('dairesel-keypad', ['#pcd-radius', '#hole-count-custom', '#hole-diam
 setActiveInput(document.getElementById('merkez-olcusu'));
 
 // --- YENİ PARTİ BAŞLAT (KAZIMA) ---
-async function fetchYeniPartiler() {
+async function fetchYeniPartiler(forceRefresh = false) {
     const listContainer = document.getElementById('yeniPartiList');
     const countText = document.getElementById('yeniPartiCount');
     
-    const cachedData = getCache('yeniPartiler');
+    const cachedData = !forceRefresh ? getCache('yeniPartiler') : null;
     if (cachedData) {
         renderYeniPartiler(cachedData);
         return;
