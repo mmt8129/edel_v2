@@ -477,27 +477,27 @@ async function refreshCurrentPage() {
 
     if (targetId === 'aktifPartilerScreen') {
         if (typeof removeCache === 'function') removeCache('aktifPartiler');
-        if (typeof fetchParties === 'function') fetchParties(true);
+        if (typeof fetchParties === 'function') await fetchParties(true);
     } else if (targetId === 'operatorAtamalariScreen') {
         if (typeof removeCache === 'function') removeCache('operatorler');
-        if (typeof fetchOperators === 'function') fetchOperators(true);
+        if (typeof fetchOperators === 'function') await fetchOperators(true);
     } else if (targetId === 'ayarciAtamalariScreen') {
         if (typeof removeCache === 'function') removeCache('ayarcilar');
-        if (typeof fetchAyarcilar === 'function') fetchAyarcilar(true);
+        if (typeof fetchAyarcilar === 'function') await fetchAyarcilar(true);
     } else if (targetId === 'yeniPartiScreen') {
         if (typeof removeCache === 'function') removeCache('yeniPartiler');
-        if (typeof fetchYeniPartiler === 'function') fetchYeniPartiler(true);
+        if (typeof fetchYeniPartiler === 'function') await fetchYeniPartiler(true);
     } else if (targetId === 'kayitGirisScreen') {
         if (typeof removeCache === 'function') removeCache('selectBenchDetails');
-        if (typeof KayitGirisApp !== 'undefined') KayitGirisApp.fetchBenchDetails(true);
+        if (typeof KayitGirisApp !== 'undefined') await KayitGirisApp.fetchBenchDetails(true);
     } else if (targetId === 'depoScreen') {
         if (typeof removeCache === 'function') removeCache('depo');
-        if (typeof fetchDepo === 'function') fetchDepo(true);
+        if (typeof fetchDepo === 'function') await fetchDepo(true);
     } else if (targetId === 'tezgahKapatmaScreen') {
         if (typeof removeCache === 'function') removeCache('tezgahKapatma');
-        if (typeof renderTezgahKapatma === 'function') renderTezgahKapatma(true);
+        if (typeof renderTezgahKapatma === 'function') await renderTezgahKapatma(true);
     } else if (typeof fetchWeather === 'function') {
-        fetchWeather();
+        await fetchWeather();
     }
 }
 // --- AKTİF PARTİLER ---
@@ -2689,25 +2689,38 @@ function openTezgahKapatma(url) {
     let startY = 0;
     let pulling = false;
     let isRefreshing = false;
-    let scrollContainer = null;
 
-    function getScrollTop() {
+    function getScrollTop(targetEl) {
         const overlay = document.getElementById('bottomTabOverlay');
         if (overlay && !overlay.classList.contains('hidden')) {
-            scrollContainer = overlay;
             return overlay.scrollTop;
         }
-        scrollContainer = null;
-        return window.scrollY || document.documentElement.scrollTop || 0;
+
+        let el = targetEl;
+        while (el && el !== document.body && el !== document.documentElement) {
+            const style = window.getComputedStyle(el);
+            const overflowY = style.overflowY;
+            if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {
+                if (el.scrollTop > 0) return el.scrollTop;
+            }
+            el = el.parentElement;
+        }
+
+        return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+    }
+
+    function resetUI() {
+        isRefreshing = false;
+        indicator.classList.remove('visible', 'refreshing', 'ready');
+        indicator.style.transform = 'translate(-50%, -140%)';
+        if (iconEl) iconEl.textContent = '↓';
+        if (textEl) textEl.textContent = 'Yenilemek için aşağı çekin';
     }
 
     function setPullUI(pullDist) {
         if (isRefreshing) return;
         if (pullDist <= 0) {
-            indicator.classList.remove('visible', 'ready');
-            indicator.style.transform = 'translate(-50%, -140%)';
-            if (iconEl) iconEl.textContent = '↓';
-            if (textEl) textEl.textContent = 'Yenilemek için aşağı çekin';
+            resetUI();
             return;
         }
         const clamped = Math.min(pullDist, 120);
@@ -2729,7 +2742,7 @@ function openTezgahKapatma(url) {
     document.addEventListener('touchstart', (e) => {
         if (isRefreshing || e.touches.length !== 1) return;
         if (document.querySelector('.modal-overlay.active')) return;
-        if (getScrollTop() <= 2) {
+        if (getScrollTop(e.target) <= 2) {
             startY = e.touches[0].clientY;
             pulling = true;
         } else {
@@ -2739,7 +2752,7 @@ function openTezgahKapatma(url) {
 
     document.addEventListener('touchmove', (e) => {
         if (!pulling || isRefreshing) return;
-        if (getScrollTop() > 2) {
+        if (getScrollTop(e.target) > 2) {
             pulling = false;
             setPullUI(0);
             return;
@@ -2752,7 +2765,7 @@ function openTezgahKapatma(url) {
         }
     }, { passive: true });
 
-    document.addEventListener('touchend', (e) => {
+    document.addEventListener('touchend', async (e) => {
         if (!pulling || isRefreshing) return;
         pulling = false;
         const endY = e.changedTouches[0]?.clientY ?? startY;
@@ -2766,15 +2779,11 @@ function openTezgahKapatma(url) {
             if (iconEl) iconEl.textContent = '🔄';
             if (textEl) textEl.textContent = 'Yenileniyor...';
 
-            refreshCurrentPage();
-
-            setTimeout(() => {
-                isRefreshing = false;
-                indicator.classList.remove('visible', 'refreshing', 'ready');
-                indicator.style.transform = 'translate(-50%, -140%)';
-                if (iconEl) iconEl.textContent = '↓';
-                if (textEl) textEl.textContent = 'Yenilemek için aşağı çekin';
-            }, 900);
+            try {
+                await refreshCurrentPage();
+            } finally {
+                setTimeout(resetUI, 300);
+            }
         } else {
             setPullUI(0);
         }
