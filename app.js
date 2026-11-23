@@ -351,6 +351,7 @@ function handleTopBackBtn() {
 }
 
 function navigateTo(screenId) {
+    window.scrollTo(0, 0);
     closeBottomTab(false);
 
     if (typeof KayitGirisApp !== 'undefined' && typeof KayitGirisApp.stopColorCheckInterval === 'function') {
@@ -2759,11 +2760,12 @@ function openTezgahKapatma(url) {
         }
         const dy = e.touches[0].clientY - startY;
         if (dy > 8) {
+            if (e.cancelable) e.preventDefault();
             setPullUI(dy * 0.65);
         } else {
             setPullUI(0);
         }
-    }, { passive: true });
+    }, { passive: false });
 
     document.addEventListener('touchend', async (e) => {
         if (!pulling || isRefreshing) return;
