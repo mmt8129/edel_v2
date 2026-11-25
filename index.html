@@ -130,8 +130,8 @@
 
         <div class="sidebar-vaka">
             <label style="font-size: 12px; font-weight: bold;">VAKA NO</label>
-            <input type="text" placeholder="Vaka No girin">
-            <button onclick="alert('Vaka aranıyor...')">Git</button>
+            <input type="text" id="sidebarVakaInput" placeholder="Vaka No girin" onkeydown="if(event.key==='Enter') openVakaByNo()">
+            <button type="button" onclick="openVakaByNo()">Git</button>
         </div>
 
         <a class="sidebar-item" onclick="openModal('settingsModal'); closeSidebar();">⚙️ Ayarlar</a>
