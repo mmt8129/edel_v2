@@ -16,6 +16,18 @@ function isHlsStreamUrl(url) {
     return /\.m3u8(\?|$)/i.test(String(url || ""));
 }
 
+function openVakaByNo() {
+    const input = document.querySelector('#sidebar .sidebar-vaka input');
+    const vakaNo = (input?.value || '').trim();
+    if (!vakaNo) {
+        showInfoModal("Uyarı", "Lütfen bir Vaka No girin.");
+        return;
+    }
+    const url = `https://uys.edelkrone.com/Manufacturing/Quality/Details/${encodeURIComponent(vakaNo)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    closeSidebar();
+}
+
 function destroyHlsInstance() {
     if (hlsInstance) {
         try {
